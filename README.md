@@ -45,6 +45,7 @@ ZIP 內固定包含八個 App payload：
 | `com.miui.packageinstaller` | 避免啟用中國 Market、病毒掃描與安裝器雲端設定 |
 | `com.miui.securitycenter` | 避免防毒雲掃描、反詐、垃圾訊息與流量服務一起切到中國版邏輯 |
 | `com.android.phone` | 避免電話、SIM 與電信功能套用中國版判斷 |
+| `com.android.systemui` | 避免狀態列、通知、控制中心與鎖定畫面套用中國版判斷 |
 
 修改排除清單後不用重新刷模組，但必須重新啟動目標 App process；已經執行中的 process 不會自動還原欄位值。
 

@@ -10,3 +10,4 @@ com.android.calendar
 com.miui.packageinstaller
 com.miui.securitycenter
 com.android.phone
+com.android.systemui
