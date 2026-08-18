@@ -4,6 +4,7 @@
 pm uninstall -k --user 0 com.miui.gallery >/dev/null 2>&1
 pm uninstall -k --user 0 com.miui.mediaeditor >/dev/null 2>&1
 pm uninstall -k --user 0 com.android.soundrecorder >/dev/null 2>&1
+pm uninstall --user 0 com.xiaomi.mibrain.speech >/dev/null 2>&1
 pm uninstall --user 0 com.android.thememanager.customthemeconfig.config.overlay >/dev/null 2>&1
 
 # 讓 Package Manager 在移除 systemless ThemeManager 後重新掃描。

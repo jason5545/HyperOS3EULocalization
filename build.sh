@@ -15,6 +15,7 @@ OUTPUT_PATH="$OUTPUT_DIR/$OUTPUT_NAME"
 
 REQUIRED_PAYLOADS="
 system/product/app/VoiceAssistAndroidT
+system/product/app/VoiceTrigger
 system/product/app/AiAsstVision
 system/product/app/MIUIAiasstService
 system/product/priv-app/MIUIContentExtension
@@ -23,6 +24,7 @@ system/product/app/MITSMClient
 system/product/app/UPTsmService
 system/product/app/PaymentService
 system/product/app/ThemeManager
+system/product/overlay/VoiceAssistAndroidOverlay
 "
 
 DATA_APP_PAYLOADS="
@@ -30,6 +32,7 @@ payload/cn-media/MiuiGallery.apk
 payload/cn-media/MiMediaEditor.apk
 payload/cn-media/SoundRecorder.apk
 payload/cn-media/MiuiThemeManagerCnOverlay.apk
+payload/xiaoai/MIUIXiaoAiSpeechEngine.apk
 "
 
 EXCLUDED_PATHS="

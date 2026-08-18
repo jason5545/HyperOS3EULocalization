@@ -3,8 +3,9 @@
 *.apk
 *.idsig
 
-# Allow APKs in system/ for Git LFS
+# Allow module payload APKs for Git LFS
 !system/**/*.apk
+!payload/**/*.apk
 
 # Development tools
 android-sdk/

@@ -56,6 +56,7 @@ esac
 
 REQUIRED_PAYLOADS="
 system/product/app/VoiceAssistAndroidT
+system/product/app/VoiceTrigger
 system/product/app/AiAsstVision
 system/product/app/MIUIAiasstService
 system/product/priv-app/MIUIContentExtension
@@ -64,6 +65,7 @@ system/product/app/MITSMClient
 system/product/app/UPTsmService
 system/product/app/PaymentService
 system/product/app/ThemeManager
+system/product/overlay/VoiceAssistAndroidOverlay
 "
 
 DATA_APP_PAYLOADS="
@@ -71,6 +73,7 @@ payload/cn-media/MiuiGallery.apk
 payload/cn-media/MiMediaEditor.apk
 payload/cn-media/SoundRecorder.apk
 payload/cn-media/MiuiThemeManagerCnOverlay.apk
+payload/xiaoai/MIUIXiaoAiSpeechEngine.apk
 "
 
 log_item "檢查固定 payload"
@@ -120,6 +123,8 @@ fi
 
 mkdir -p "$MODPATH/system/etc/localization/SystemVersion"
 touch "$MODPATH/system/etc/localization/XiaoAI"
+touch "$MODPATH/system/etc/localization/VoiceTrigger"
+touch "$MODPATH/system/etc/localization/SpeechEngine"
 touch "$MODPATH/system/etc/localization/AICall"
 touch "$MODPATH/system/etc/localization/ContentExtension"
 touch "$MODPATH/system/etc/localization/Mipay"
@@ -143,6 +148,6 @@ if ! pm path org.lsposed.corepatch >/dev/null 2>&1; then
     log_warn "未偵測到 CorePatch；ThemeManager 的 shared UID／簽章相容可能失敗。"
 fi
 
-log_item "已安裝：小愛、AI 通話、傳送門、智慧卡支付鏈路"
-log_item "已準備：國行相簿、編輯器、錄音機正常安裝 payload 與 ThemeManager systemless payload"
+log_item "已安裝：小愛、語音喚醒、AI 通話、傳送門、智慧卡支付鏈路"
+log_item "已準備：小米語音引擎、國行相簿、編輯器、錄音機正常安裝 payload 與 ThemeManager systemless payload"
 log_item "已加入：AI 通話官方入口與 cloud-control、Taplus、Theme API region、Wallet/GMS 安全排除與 App 語系設定"
