@@ -37,7 +37,7 @@ fi
 
 STANDALONE_TAPLUS="$NVBASE/modules/taplus_intl_fix"
 if [ -d "$STANDALONE_TAPLUS" ] && [ ! -e "$STANDALONE_TAPLUS/disable" ] && [ ! -e "$STANDALONE_TAPLUS/remove" ]; then
-    log_warn "偵測到獨立 taplus_intl_fix；v1.0.2 已內建相同 hook，安裝後請移除舊模組。"
+    log_warn "偵測到獨立 taplus_intl_fix；本模組已內建相同 hook，安裝後請移除舊模組。"
 fi
 
 if [ "$BUILDHOST" != "xiaomi.eu" ]; then
@@ -120,6 +120,7 @@ fi
 
 mkdir -p "$MODPATH/system/etc/localization/SystemVersion"
 touch "$MODPATH/system/etc/localization/XiaoAI"
+touch "$MODPATH/system/etc/localization/AICall"
 touch "$MODPATH/system/etc/localization/ContentExtension"
 touch "$MODPATH/system/etc/localization/Mipay"
 touch "$MODPATH/system/etc/localization/Gallery"
@@ -142,6 +143,6 @@ if ! pm path org.lsposed.corepatch >/dev/null 2>&1; then
     log_warn "未偵測到 CorePatch；ThemeManager 的 shared UID／簽章相容可能失敗。"
 fi
 
-log_item "已安裝：小愛、傳送門、智慧卡支付鏈路"
+log_item "已安裝：小愛、AI 通話、傳送門、智慧卡支付鏈路"
 log_item "已準備：國行相簿、編輯器、錄音機正常安裝 payload 與 ThemeManager systemless payload"
-log_item "已加入：Taplus、Theme API region、Wallet/GMS 安全排除與 App 語系設定"
+log_item "已加入：AI 通話官方入口與 cloud-control、Taplus、Theme API region、Wallet/GMS 安全排除與 App 語系設定"

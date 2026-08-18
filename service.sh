@@ -13,7 +13,7 @@ if [ ! -f "$VERSION_DIR/$SYSTEM_VERSION" ]; then
 fi
 
 # 等系統服務與 user 0 ready，再套用每個 App 的語系。
-# 小愛使用簡中；其餘新增 App 使用繁中（台灣）。
+# 小愛與 AI 通話使用簡中；其餘新增 App 使用繁中（台灣）。
 BOOT_WAIT=0
 while [ "$(getprop sys.boot_completed)" != "1" ] && [ "$BOOT_WAIT" -lt 120 ]; do
     sleep 2

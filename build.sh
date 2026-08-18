@@ -82,14 +82,21 @@ if [ ! -f "$ROOT_DIR/excluded_packages.txt" ]; then
     exit 1
 fi
 
+if [ ! -f "$ROOT_DIR/action.sh" ]; then
+    echo "缺少 AI 通話模組入口: action.sh" >&2
+    exit 1
+fi
+
 mkdir -p "$OUTPUT_DIR"
 rm -f "$OUTPUT_PATH"
 
 cd "$ROOT_DIR"
 zip -qr "$OUTPUT_PATH" \
-    META-INF \
+    META-INF/com/google/android/update-binary \
+    META-INF/com/google/android/updater-script \
     module.prop \
     customize.sh \
+    action.sh \
     service.sh \
     uninstall.sh \
     tools/unity_install.sh \

@@ -1,10 +1,10 @@
-# HyperOS 3 EU 小愛・傳送門・智慧卡・國行媒體
+# HyperOS 3 EU 小愛・AI 通話・傳送門・智慧卡・國行媒體
 
 這是 [LSHFGJ/HyperOS3EULocalization](https://github.com/LSHFGJ/HyperOS3EULocalization) 的量身精簡版，供 xiaomi.eu HyperOS 3 使用。
 
-它補回小愛、傳送門、智慧卡需要的元件，加入國行相簿、相簿編輯器、錄音機與主題商店，並修正國際版 ROM 無法觸發 Taplus 長按的問題。沒有音量鍵選單，也不會順手裝回負一屏、簡訊、黃頁、GetApps、快應用或小米錢包。
+它補回小愛、AI 通話、傳送門、智慧卡需要的元件，加入國行相簿、相簿編輯器、錄音機與主題商店，並修正國際版 ROM 無法觸發 Taplus 長按的問題。沒有音量鍵選單，也不會順手裝回負一屏、簡訊、黃頁、GetApps、快應用或小米錢包。
 
-目前版本是 `v1.0.2`。實機開發與驗證環境為 Xiaomi myron、xiaomi.eu `OS3.0.308.0.WPMCNXM`、Android 16、KernelSU 與 Zygisk Next。
+目前版本是 `v1.0.3`。實機開發與驗證環境為 Xiaomi myron、xiaomi.eu `OS3.0.308.0.WPMCNXM`、Android 16、KernelSU 與 Zygisk Next。
 
 ## 模組內容
 
@@ -14,7 +14,7 @@ ZIP 內固定包含十二個 App payload，另有一個 ThemeManager CN overlay�
 | --- | --- | --- |
 | 小愛語音 | `com.miui.voiceassist` | `system/product/app/VoiceAssistAndroidT` |
 | 小愛視覺 | `com.xiaomi.aiasst.vision` | `system/product/app/AiAsstVision` |
-| 小愛服務 | `com.xiaomi.aiasst.service` | `system/product/app/MIUIAiasstService` |
+| 小愛服務／AI 通話 | `com.xiaomi.aiasst.service` | `system/product/app/MIUIAiasstService` |
 | 傳送門 | `com.miui.contentextension` | `system/product/priv-app/MIUIContentExtension` |
 | NextPay | `com.miui.nextpay` | `system/product/app/MINextpay` |
 | 小米智慧卡 | `com.miui.tsmclient` | `system/product/app/MITSMClient` |
@@ -26,6 +26,14 @@ ZIP 內固定包含十二個 App payload，另有一個 ThemeManager CN overlay�
 | 國行主題商店 | `com.android.thememanager` | `system/product/app/ThemeManager` |
 
 四個國行 App 與 CN overlay 直接取自 MYRON 官方 `OS3.0.308.0.WPMCNXM` OTA。ThemeManager 依實機位置放在 `/product/app`；相簿、編輯器與錄音機則由開機服務安裝到正常 `/data/app`，讓 Android 自己抽出 native libraries，不建立額外 bind mount。
+
+### AI 通話
+
+AI 通話不是另一顆獨立 APK；它就在 `com.xiaomi.aiasst.service` 裡。模組沿用與目前 xiaomi.eu ROM 相容、帶繁中資源的同版本 APK，不以小米應用商店的較新版本覆蓋 ROM，避免 InCallUI、shared UID 或簽章相容問題。
+
+電話 App 的原生 AI 通話項目會向 `com.xiaomi.aiasst.service.aicall.provider` 查詢可用狀態。本模組不偽裝 `ro.product.mod_device`；`com.xiaomi.aiasst.service` 也列入 Taplus 排除清單，不套用任何 Zygisk 欄位翻轉。AI 通話由小米官方 cloud-control 的機型規則、帳號、網路、權限與使用者開關決定可用性。`com.android.contacts`、`com.android.phone` 同樣保留在排除清單。
+
+重新開機後，可在 KernelSU／Magisk／APatch 的本模組頁面按「執行」，叫出小米官方 AI 通話設定完成首次啟用。完成後由 Provider 把原生項目提供給電話 App，不使用假 Launcher APK 或修改 Contacts。第一次啟用仍會顯示小米的使用者協議、隱私政策與系統權限頁；模組不會自動替使用者同意。
 
 ### 國行 App 簽章與版本
 
@@ -88,7 +96,7 @@ Google Wallet 與 Google Play services 會強制走 denylist unmount，並卸載
 
 開機服務會設定個別 App 語系，不會改系統語言：
 
-- 小愛語音、小愛視覺、小愛服務：`zh-CN`
+- 小愛語音、小愛視覺、小愛服務／AI 通話：`zh-CN`
 - 傳送門、NextPay、小米智慧卡、銀聯 TSM、支付服務：`zh-TW`
 - 國行相簿、相簿編輯器、錄音機、主題商店：`zh-TW`
 
@@ -123,7 +131,7 @@ ro.vendor.audio.aiasst.support=true
 
 不要和原版 `HyperOS3EULocalization` 同時啟用，兩者會掛載相同路徑。安裝器偵測到原版仍啟用時會中止。
 
-若裝置上還有獨立的 `taplus_intl_fix`，請移除舊模組。v1.0.2 已經內建相同 hook，沒有必要讓每個 App process 載入兩次。
+若裝置上還有獨立的 `taplus_intl_fix`，請移除舊模組。本模組已經內建相同 hook，沒有必要讓每個 App process 載入兩次。
 
 ## 安裝
 

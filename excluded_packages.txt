@@ -12,5 +12,6 @@ com.miui.packageinstaller
 com.miui.securitycenter
 com.android.phone
 com.android.systemui
+com.xiaomi.aiasst.service
 com.google.android.apps.walletnfcrel
 com.google.android.gms
