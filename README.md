@@ -1,8 +1,8 @@
-# HyperOS 3 EU 小愛・傳送門・Mi Pay
+# HyperOS 3 EU 小愛・傳送門・智慧卡
 
 這是從 [LSHFGJ/HyperOS3EULocalization](https://github.com/LSHFGJ/HyperOS3EULocalization) 精簡出的固定功能版本，目標是 xiaomi.eu HyperOS 3。
 
-安裝時不需要用音量鍵選功能。模組只會掛載下面九個 App payload：
+安裝時不需要用音量鍵選功能。模組只會掛載下面八個 App payload：
 
 | 功能 | Package | 路徑 |
 | --- | --- | --- |
@@ -12,7 +12,6 @@
 | 傳送門 | `com.miui.contentextension` | `system/product/priv-app/MIUIContentExtension` |
 | Mi Pay / NextPay | `com.miui.nextpay` | `system/product/app/MINextpay` |
 | 小米智慧卡 | `com.miui.tsmclient` | `system/product/app/MITSMClient` |
-| 小米錢包 | `com.mipay.wallet` | `system/product/app/MipayWallet` |
 | 銀聯 TSM | `com.unionpay.tsmservice.mi` | `system/product/app/UPTsmService` |
 | 小米支付服務 | `com.xiaomi.payment` | `system/product/app/PaymentService` |
 
@@ -28,7 +27,9 @@ v1.0.2 內建已在這台裝置驗證過的 Zygisk hook：只在非排除 App �
 
 ## App 語系
 
-開機後會把小愛語音、視覺與服務指定為 `zh-CN`；傳送門、NextPay、小米智慧卡、小米錢包、銀聯 TSM 與支付服務指定為 `zh-TW`。這是每個 App 的語系設定，不會改系統語言或 ROM 地區。
+開機後會把小愛語音、視覺與服務指定為 `zh-CN`；傳送門、NextPay、小米智慧卡、銀聯 TSM 與支付服務指定為 `zh-TW`。這是每個 App 的語系設定，不會改系統語言或 ROM 地區。
+
+模組不安裝 `com.mipay.wallet`。智慧卡卡包、門卡、交通卡、車鑰匙與基礎 NFC 鏈路保留；銀行卡、Mi Pay 錢包入口及部分依賴錢包的儲值流程不可用。
 
 ## 會寫入的系統屬性
 
@@ -58,7 +59,6 @@ com.miui.nextpay
 com.miui.contentextension
 com.xiaomi.payment
 com.miui.voiceassist
-com.mipay.wallet
 com.unionpay.tsmservice.mi
 ```
 
@@ -72,7 +72,7 @@ com.unionpay.tsmservice.mi
 ./build.sh
 ```
 
-ZIP 會產生在 `dist/`。建置腳本會驗證固定的九個 App payload、Taplus arm64 Zygisk binary 與排除清單，並拒絕把多餘 App 包進去。
+ZIP 會產生在 `dist/`。建置腳本會驗證固定的八個 App payload、Taplus arm64 Zygisk binary 與排除清單，並拒絕把小米錢包或其他多餘 App 包進去。
 
 ## 授權與來源
 

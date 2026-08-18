@@ -1,6 +1,6 @@
 id=HyperOS3EUXiaoAiPortalMiPay
-name=HyperOS 3 EU 小愛・傳送門・Mi Pay
+name=HyperOS 3 EU 小愛・傳送門・智慧卡
 version=v1.0.2
 versionCode=102
 author=Jason（基於 LSHFGJ 版本精簡）
-description=只恢復小愛、傳送門與完整 Mi Pay 鏈路；內建 Taplus 國際版 Zygisk 修復與指定 App 語系，不覆寫 ROM 地區。
+description=只恢復小愛、傳送門、智慧卡與必要支付服務，不安裝小米錢包；內建 Taplus 國際版 Zygisk 修復與指定 App 語系。

@@ -61,7 +61,6 @@ system/product/app/MIUIAiasstService
 system/product/priv-app/MIUIContentExtension
 system/product/app/MINextpay
 system/product/app/MITSMClient
-system/product/app/MipayWallet
 system/product/app/UPTsmService
 system/product/app/PaymentService
 "
@@ -73,6 +72,9 @@ for payload in $REQUIRED_PAYLOADS; do
         fail_install
     fi
 done
+
+# v1.0.2 早期版本曾包含小米錢包；更新時明確清掉舊 payload。
+rm -rf "$MODPATH/system/product/app/MipayWallet"
 
 if [ ! -f "$MODPATH/zygisk/arm64-v8a.so" ]; then
     log_warn "缺少 Taplus Zygisk arm64 binary"
@@ -100,5 +102,5 @@ EOF
 
 rm -rf /data/system/package_cache/*
 
-log_item "已安裝：小愛語音／視覺／服務、傳送門、Mi Pay 完整鏈路"
+log_item "已安裝：小愛語音／視覺／服務、傳送門、智慧卡與必要支付服務"
 log_item "已加入：Taplus 國際版 Zygisk 修復與 App 語系設定"

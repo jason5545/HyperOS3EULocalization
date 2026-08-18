@@ -7,7 +7,8 @@ ASH_STANDALONE=1
 
 ui_print ""
 ui_print "[HyperOS 3 EU 小愛・傳送門・Mi Pay]"
-ui_print "- 固定安裝小愛、傳送門與完整 Mi Pay 鏈路"
+ui_print "- 固定安裝小愛、傳送門、智慧卡與必要支付服務"
+ui_print "- 不安裝小米錢包 App；銀行卡與部分儲值入口不可用"
 ui_print "- 內建 Taplus 國際版 Zygisk 修復，不安裝 Focus overlay"
 ui_print "- 小愛固定簡中，其餘新增 App 固定繁中（台灣）"
 ui_print ""

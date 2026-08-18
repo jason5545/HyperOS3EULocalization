@@ -20,7 +20,6 @@ system/product/app/MIUIAiasstService
 system/product/priv-app/MIUIContentExtension
 system/product/app/MINextpay
 system/product/app/MITSMClient
-system/product/app/MipayWallet
 system/product/app/UPTsmService
 system/product/app/PaymentService
 "
@@ -28,6 +27,7 @@ system/product/app/PaymentService
 EXCLUDED_PATHS="
 system/product/app/HybridPlatform
 system/product/app/MIUISuperMarket
+system/product/app/MipayWallet
 system/product/priv-app/PersonalAssistant
 system/product/priv-app/Mms
 system/product/priv-app/MIUIYellowPage
