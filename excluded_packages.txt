@@ -9,3 +9,4 @@ com.miui.weather2
 com.android.calendar
 com.miui.packageinstaller
 com.miui.securitycenter
+com.android.phone
