@@ -5,3 +5,4 @@
 com.miui.home
 com.miui.personalassistant
 com.android.contacts
+com.miui.weather2
