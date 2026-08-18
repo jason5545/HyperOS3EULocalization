@@ -4,7 +4,7 @@
 
 它補回小愛、語音喚醒、小米語音引擎、AI 通話、傳送門、智慧卡需要的元件，加入國行相簿、相簿編輯器、錄音機與主題商店，並修正國際版 ROM 無法觸發 Taplus 長按的問題。沒有音量鍵選單，也不會順手裝回負一屏、簡訊、黃頁、GetApps、快應用或小米錢包。
 
-目前版本是 `v1.0.4`。實機開發與驗證環境為 POCO F8 Ultra（myron）、xiaomi.eu `OS3.0.308.0.WPMCNXM`、Android 16、KernelSU 與 Zygisk Next。
+目前版本是 `v1.0.5`。實機開發與驗證環境為 POCO F8 Ultra（myron）、xiaomi.eu `OS3.0.308.0.WPMCNXM`、Android 16、KernelSU 與 Zygisk Next。
 
 ## 模組內容
 
@@ -28,15 +28,19 @@ ZIP 內固定包含十四個 App payload，另有小愛預設助理與 ThemeMana
 | 國行錄音機 | `com.android.soundrecorder` | `payload/cn-media/SoundRecorder.apk` |
 | 國行主題商店 | `com.android.thememanager` | `system/product/app/ThemeManager` |
 
-新增的國行元件直接取自 MYRON 官方 `OS3.0.308.0.WPMCNXM` OTA。ThemeManager、VoiceTrigger 與小愛預設助理 overlay 走 systemless 原始路徑；語音引擎、相簿、編輯器與錄音機則由開機服務安裝到正常 `/data/app`，讓 Android 自己處理 native libraries，不建立額外 bind mount。
+新增的國行元件主要取自 MYRON 官方 `OS3.0.308.0.WPMCNXM` OTA；主小愛語音則保留已驗證可與 Hey Google 雙喚醒的 304 版。ThemeManager、VoiceTrigger 與小愛預設助理 overlay 走 systemless 原始路徑；語音引擎、相簿、編輯器與錄音機則由開機服務安裝到正常 `/data/app`，讓 Android 自己處理 native libraries，不建立額外 bind mount。
 
 ### 語音喚醒、語音引擎與預設助理
 
 `com.miui.voicetrigger` 提供小愛的原生語音喚醒、聲紋訓練與設定入口。MYRON 的 Sound Trigger HAL 正常存在；模組只補回國行 APK，不偽造硬體 feature，也不加入推薦內容、`VoiceAssistProxy` 或其他小愛資訊流元件。
 
+實機 A/B 測試確認，主小愛 308 `7.12.2.0318`（`507012002`）會讓小愛與 Hey Google 的 SoundTrigger session 無法穩定共存，因此主小愛保留 304 `7.10.3.1514`（`507010003`）。小愛視覺使用 308 `5.12.4.20`（`540120420`），VoiceTrigger 與語音引擎也維持 308；這是目前已驗證兩組喚醒詞可同時使用的組合。AI 通話服務的 304／308 版本同為 `6.0.3`（`2535`），因此保留 xiaomi.eu 現有、帶相容語系的 APK，不做沒有版本收益的替換。
+
 `com.xiaomi.mibrain.speech` 是小米的 ASR／TTS 引擎。它在官方 ROM 原本就是可移除 data-app，因此本模組也用正常 `pm install` 安裝，不改簽、不提高成 system App；Google 語音服務仍可保留與選用。
 
 `VoiceAssistAndroidOverlay` 只把 framework 的 `config_defaultAssistant` 預設值設為 `com.miui.voiceassist`。它不移除其他 `VoiceInteractionService`，也不覆寫使用者已明確選好的助理。實機同時可解析 Google、小愛與 ChatGPT；目前已選定的 Google 助理會維持原值，之後仍可在系統設定自由切換。
+
+第一次安裝或重建聲紋後，如果兩組喚醒詞都沒有反應，請在「預設數位助理應用程式」先選一次小愛，再切回 Google。這會讓系統重新建立兩邊的 SoundTrigger session；模組不會在背景自動替使用者切換預設助理。
 
 ### AI 通話
 
