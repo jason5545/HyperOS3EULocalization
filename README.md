@@ -1,109 +1,79 @@
-# HyperOS3 EU Localization
+# HyperOS 3 EU 小愛・傳送門・Mi Pay
 
-为 xiaomi.eu HyperOS 3 ROM 恢复部分国区组件的 Magisk / KernelSU / APatch 模块。
+這是從 [LSHFGJ/HyperOS3EULocalization](https://github.com/LSHFGJ/HyperOS3EULocalization) 精簡出的固定功能版本，目標是 xiaomi.eu HyperOS 3。
 
-## 目录
+安裝時不需要用音量鍵選功能。模組只會掛載下面九個 App payload：
 
-- [功能范围](#功能范围)
-- [安装要求](#安装要求)
-- [安装与选择](#安装与选择)
-- [KernelSU 注意事项](#kernelsu--sukisu--apatch-注意事项)
-- [项目结构](#项目结构)
-
-## 功能范围
-
-### 小米智能卡 / 公交卡链路
-
-模块会恢复智能卡相关组件：
-
-| 功能 | 包 / 组件 | 模块路径 |
+| 功能 | Package | 路徑 |
 | --- | --- | --- |
-| 小米智能卡客户端 | `com.miui.tsmclient` | `system/product/app/MITSMClient` |
-| 小米钱包 | `com.mipay.wallet` | `system/product/app/MipayWallet` |
-| 小米支付 / NextPay | `com.miui.nextpay` | `system/product/app/MINextpay` |
-| 银联 TSM 服务 | `com.unionpay.tsmservice.mi` | `system/product/app/UPTsmService` |
-| 小米支付服务 | `com.xiaomi.payment` | `system/product/app/PaymentService` |
+| 小愛語音 | `com.miui.voiceassist` | `system/product/app/VoiceAssistAndroidT` |
+| 小愛視覺 | `com.xiaomi.aiasst.vision` | `system/product/app/AiAsstVision` |
+| 小愛服務 | `com.xiaomi.aiasst.service` | `system/product/app/MIUIAiasstService` |
+| 傳送門 | `com.miui.contentextension` | `system/product/priv-app/MIUIContentExtension` |
+| Mi Pay / NextPay | `com.miui.nextpay` | `system/product/app/MINextpay` |
+| 小米智慧卡 | `com.miui.tsmclient` | `system/product/app/MITSMClient` |
+| 小米錢包 | `com.mipay.wallet` | `system/product/app/MipayWallet` |
+| 銀聯 TSM | `com.unionpay.tsmservice.mi` | `system/product/app/UPTsmService` |
+| 小米支付服務 | `com.xiaomi.payment` | `system/product/app/PaymentService` |
 
-### 可选基础组件
+不會額外安裝負一屏、簡訊、黃頁、GetApps 或快應用，也不會建立原版的 CleanMaster 空白覆蓋檔。
 
-安装时可以选择恢复以下基础组件：
+## Taplus 長按修復
 
-| 功能 | 包 / 组件 | 模块路径 |
-| --- | --- | --- |
-| 小爱语音 | `com.miui.voiceassist` | `system/product/app/VoiceAssistAndroidT` |
-| 小爱视觉 | `com.xiaomi.aiasst.vision` | `system/product/app/AiAsstVision` |
-| 小爱服务 | `com.xiaomi.aiasst.service` | `system/product/app/MIUIAiasstService` |
-| 负一屏 | `com.miui.personalassistant` | `system/product/priv-app/PersonalAssistant` |
-| 短信 | `com.android.mms` | `system/product/priv-app/Mms` |
-| 传送门 | `com.miui.contentextension` | `system/product/priv-app/MIUIContentExtension` |
-| 黄页 | `com.miui.yellowpage` | `system/product/priv-app/MIUIYellowPage` |
-| 快应用框架 | `com.miui.hybrid` | `system/product/app/HybridPlatform` |
-| 小米应用商店 / GetApps | `com.xiaomi.market` | `system/product/app/MIUISuperMarket` |
+這台 xiaomi.eu ROM 的 `miui.contentcatcher.InterceptorProxy.create(Activity)` 會在國際版判斷成立時直接回傳 `null`，所以傳送門雖然已開啟，App 內長按仍不會建立攔截器。
 
-安装器中还保留了国际版标识屏蔽选项，它会写入少量系统属性，不是独立恢复应用。
+v1.0.2 內建已在這台裝置驗證過的 Zygisk hook：只在非排除 App 的進程內把 `miui.os.Build.IS_INTERNATIONAL_BUILD` 改為 `false`。它不改全域 prop、不碰 `system_server`，也不會把整台 ROM 切成中國版。預設排除 Launcher 與負一屏，清單在模組根目錄的 `excluded_packages.txt`。
 
-### Focus / XMS 权限补全
+這個修復需要 Zygisk Next 正常啟用。標準 Android `TextView` 已驗證可觸發；YouTube Litho 這類虛擬文字節點仍超出 MIUI 原生擷取器能力，這不是手勢設定造成的。
 
-模块内置一个静态 product overlay：`system/product/overlay/FocusXmsOverlay/FocusXmsOverlay.apk`。它面向 `miui.systemui.plugin` 补全 `config_pass_xms_permission`，用于恢复短信验证码等已在 Focus 白名单链路中的应用发送灵动岛弹幕通知的权限门槛。
+## App 語系
 
-> [!NOTE]
-> 模块不再绑定固定机型或固定版本号，但仍然面向 HyperOS 3。非 xiaomi.eu 或非 HyperOS 3 环境可能可以刷入，但不保证功能表现。建议先完整备份重要数据，并确认能进入 Recovery / Fastboot 以便回滚。
+開機後會把小愛語音、視覺與服務指定為 `zh-CN`；傳送門、NextPay、小米智慧卡、小米錢包、銀聯 TSM 與支付服務指定為 `zh-TW`。這是每個 App 的語系設定，不會改系統語言或 ROM 地區。
 
-## 安装与选择
+## 會寫入的系統屬性
 
-1. 下载 `HyperOS3_EU_Localization_v2.0.zip`。
-2. 如果使用 KernelSU，先安装并启用可用的挂载元模块。
-3. 在 Magisk / KernelSU / SukiSU / APatch 管理器中刷入模块。
-4. 安装器会通过音量键询问是否启用功能组：
-   - **基础服务**：小爱、负一屏、短信、传送门、黄页等。
-   - **小米钱包**：智能卡、公交卡、MiPay 支付服务相关链路。
-   - **小米应用商店**：应用商店 / GetApps。
-   - **系统优化**：国际版标识屏蔽、快应用框架和少量属性项。
-5. 重启设备。
-6. 如果使用 KernelSU / SukiSU / APatch，请按下一节检查 App Profile。
+模組只會透過 `system.prop` 補上 Mi Pay 與小愛需要、但這包 ROM 目前沒有提供的兩個功能開關：
 
-## KernelSU 注意事项
+```properties
+ro.se.type=eSE,HCE,UICC
+ro.vendor.audio.aiasst.support=true
+```
 
-> [!IMPORTANT]
-> KernelSU 场景要求先具备可用的 systemless 文件挂载元模块 / 挂载能力；推荐 [`magic_mount_rs`](https://github.com/KernelSU-Modules-Repo/magic_mount_rs)，其他等价元模块也可以。App Profile 的 `Umount modules` / `卸载模块` 只是第二层命名空间可见性开关，不能替代底层挂载能力。
+`ro.product.mod_device`、`ro.miui.region` 與 Mi Push cache 都不修改，完整沿用 ROM 與目前使用者地區。模組也不包含先前測試過、後來確認這台 ROM 不需要的 `FocusXmsOverlay`。
 
-SukiSU Ultra / APatch / Magisk 等如果已经自带可用的系统文件挂载能力，通常不需要额外安装元模块。
+## 安裝
 
-基于 KernelSU 的 Root 管理器建议关闭以下应用的 `Umount modules` 以确保全部功能可用：
+1. 確認裝置是 xiaomi.eu HyperOS 3，並保留可進入 Recovery / Fastboot 的回復方式。
+2. KernelSU 使用者先啟用可用的 systemless 掛載元模組，例如 `magic_mount_rs`。
+3. 從 Magisk、KernelSU、SukiSU 或 APatch 的模組管理器安裝 ZIP。
+4. 重新開機。
+
+KernelSU / SukiSU 如果有針對個別 App 啟用 `Umount modules`，至少要讓下面這些 UID / package 看得到模組掛載：
 
 ```text
 android.uid.system
-com.android.smspush
 android.uid.nfc
-com.miui.nextpay
-com.xiaomi.market
-com.miui.personalassistant
-com.android.permissioncontroller
 android.uid.phone
-com.android.mms
+com.miui.nextpay
+com.miui.contentextension
 com.xiaomi.payment
-com.miui.home
 com.miui.voiceassist
 com.mipay.wallet
+com.unionpay.tsmservice.mi
 ```
 
-## 项目结构
+不要和原版 `HyperOS3EULocalization` 同時啟用；兩者會掛載相同路徑，安裝器偵測到原版仍啟用時會中止。
 
-```text
-HyperOS3EULocalization/
-├── META-INF/                         # 模块安装入口
-├── archive/                          # 暂时停用的实验性组件归档
-├── scripts/                          # 构建与诊断脚本
-├── system/product/app/               # 普通系统应用 payload
-├── system/product/overlay/           # Focus / XMS 静态 overlay payload
-├── system/product/priv-app/          # 特权应用 payload
-├── overlay-src/                      # overlay 源码留档
-├── tools/                            # 安装时处理逻辑
-├── customize.sh                      # 安装器交互脚本
-├── module.prop                       # 模块元信息
-└── service.sh                        # 开机服务脚本
+若先前已安裝獨立的 `taplus_intl_fix`，裝好 v1.0.2 後應移除舊模組。兩支 hook 同時存在不會改全域屬性，但沒有必要讓每個 App process 重複載入。
+
+## 建置
+
+```sh
+./build.sh
 ```
 
-## 致谢
+ZIP 會產生在 `dist/`。建置腳本會驗證固定的九個 App payload、Taplus arm64 Zygisk binary 與排除清單，並拒絕把多餘 App 包進去。
 
-本项目基于 [MinaMichita/MiuiEULocalizationToolsBox](https://github.com/MinaMichita/MiuiEULocalizationToolsBox) 的原始工作继续调整，感谢原作者的开创性工作。
+## 授權與來源
+
+沿用上游的 GPL-3.0 授權。原始專案也承襲自 MinaMichita/MiuiEULocalizationToolsBox。

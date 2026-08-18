@@ -1,8 +1,6 @@
-version=v2.0
-modify=Adapted for any HyperOS 3 device/build
-
-id=HyperOS3EULocalization
-name=HyperOS3 EU 本地化
-versionCode=20
-author=LSHFGJ
-description=Restore selected CN HyperOS 3 components for xiaomi.eu ROMs.
+id=HyperOS3EUXiaoAiPortalMiPay
+name=HyperOS 3 EU 小愛・傳送門・Mi Pay
+version=v1.0.2
+versionCode=102
+author=Jason（基於 LSHFGJ 版本精簡）
+description=只恢復小愛、傳送門與完整 Mi Pay 鏈路；內建 Taplus 國際版 Zygisk 修復與指定 App 語系，不覆寫 ROM 地區。

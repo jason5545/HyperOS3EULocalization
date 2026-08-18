@@ -21,6 +21,11 @@ archive/
 docs/
 scripts/
 tests/
+!scripts/
+scripts/*
+!scripts/build_zygisk.sh
+zygisk-src/libs/
+zygisk-src/obj/
 
 # Python virtual environment
 .venv/
@@ -34,6 +39,7 @@ tests/
 *.log
 *.txt
 !lang/*.txt
+!excluded_packages.txt
 
 # Debug scripts (development only)
 capture_logs_auto.sh

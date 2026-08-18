@@ -1,0 +1,7 @@
+# v1.0.2 Taplus Zygisk hook 排除清單
+# 一行一個 package name，這些進程會跳過 IS_INTERNATIONAL_BUILD 翻轉（保留國際版行為，避免 CN 專屬入口）
+# 部署位置：/data/adb/modules/HyperOS3EUXiaoAiPortalMiPay/excluded_packages.txt
+# 修改後免重開機，重啟該 app 即生效
+com.miui.home
+com.miui.personalassistant
+com.android.contacts

@@ -5,8 +5,8 @@ umask 022
 ui_print() { echo "$1"; }
 
 require_module_installer() {
-  ui_print "HyperOS3 EU Localization is a Magisk-compatible root-module zip."
-  ui_print "Install it from a Magisk, KernelSU, or APatch bootmode module manager so customize.sh can run."
+  ui_print "這是 Magisk 相容 root 模組。"
+  ui_print "請從 Magisk、KernelSU、SukiSU 或 APatch 的模組管理器安裝。"
   exit 1
 }
 

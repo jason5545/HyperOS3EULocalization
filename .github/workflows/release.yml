@@ -3,15 +3,8 @@ name: Build and Release
 on:
   push:
     tags:
-      - 'v*'
-  release:
-    types: [created]
+      - "v*"
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version tag (e.g., v2.0)'
-        required: true
-        default: 'v2.0'
 
 permissions:
   contents: write
@@ -19,90 +12,26 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
-      - name: Checkout repository
+      - name: Checkout repository and payloads
         uses: actions/checkout@v4
         with:
           lfs: true
-        
-      - name: Get version
-        id: version
+
+      - name: Build fixed-feature module
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event_name }}" = "release" ]; then
-            echo "VERSION=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
-          else
-            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          fi
-          
-      - name: Download system files (if available)
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Try to download system.zip from releases
-          gh release download --pattern "system.zip" --dir . 2>/dev/null || true
-          if [ -f "system.zip" ]; then
-            unzip -o system.zip
-            echo "SYSTEM_AVAILABLE=true" >> $GITHUB_ENV
-          fi
-          
-      - name: Create Module ZIP
-        run: |
-          VERSION="${{ steps.version.outputs.VERSION }}"
-          
-          # Create module zip
-          zip -r "HyperOS3_EU_Localization_${VERSION}.zip" \
-            META-INF module.prop customize.sh service.sh uninstall.sh lang tools \
-            -x "*.git*"
-            
-          # Add system files if available
-          if [ -d "system" ]; then
-            zip -ur "HyperOS3_EU_Localization_${VERSION}.zip" system
-            echo "✓ Added system files to module ZIP"
-          else
-            echo "⚠ system/ not found - upload system.zip to a release first"
-          fi
-          
-          ls -lh *.zip
-          
-      - name: Upload Release Assets
-        if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            HyperOS3_EU_Localization_${{ steps.version.outputs.VERSION }}.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
-      - name: Create Release (for tag push)
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ steps.version.outputs.VERSION }}
-          name: HyperOS3 EU Localization ${{ steps.version.outputs.VERSION }}
-          body: |
-            ## HyperOS3 EU Localization ${{ steps.version.outputs.VERSION }}
-            
-            ### Downloads
-            - **Magisk/KernelSU/APatch Module**: `HyperOS3_EU_Localization_${{ steps.version.outputs.VERSION }}.zip`
-            
-            ### Installation
-            1. Flash the module ZIP in Magisk/KernelSU/APatch
-            2. Reboot
-          files: |
-            HyperOS3_EU_Localization_${{ steps.version.outputs.VERSION }}.zip
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
-      - name: Upload Artifacts (for manual workflow)
-        if: github.event_name == 'workflow_dispatch'
+          chmod +x build.sh
+          ./build.sh
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: build-outputs
-          path: |
-            *.zip
+          name: HyperOS3-EU-XiaoAI-Portal-MiPay
+          path: dist/*.zip
+
+      - name: Attach ZIP to tagged release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip

@@ -1,16 +1,8 @@
 fail_install() {
-    rm -rf $MODPATH
-    rm -f $MODDIR/update
+    ui_print "! 安裝中止"
+    rm -rf "$MODPATH"
+    rm -f "$MODDIR/update"
     exit 1
-}
-
-waiting() {
-    sleep $1
-}
-
-log_section() {
-    ui_print ""
-    ui_print "[$1]"
 }
 
 log_item() {
@@ -21,251 +13,92 @@ log_warn() {
     ui_print "! $1"
 }
 
-mark_selected() {
-    local name="$1"
-    touch "$MODPATH/system/etc/localization/$name"
-}
+MODDIR="$NVBASE/modules/$MODID"
+MODVERSION="$(grep_prop version "$MODPATH/module.prop")"
+BUILDHOST="$(getprop ro.build.host)"
+MIUIVERSION="$(getprop ro.system.build.version.incremental)"
+HYPEROSVERSION="$(getprop ro.mi.os.version.name)"
+BUILDDISPLAY="$(getprop ro.build.display.id)"
 
-remove_path() {
-    rm -rf "$MODPATH/$1"
-}
+SYSTEM_VERSION=${MIUIVERSION:-unknown}
 
-bool_enabled() {
-    [ "${1:-false}" = "true" ]
-}
+log_item "檢查安裝環境"
 
-MODDIR=$NVBASE/modules/$MODID
-MODMODIFY=`grep_prop modify $MODPATH/module.prop`
-MODVERSION=`grep_prop version $MODPATH/module.prop`
-BUILDHOST=`getprop ro.build.host`
-MIUIVERSION=`getprop ro.system.build.version.incremental`
-HYPEROSVERSION=`getprop ro.mi.os.version.name`
-BUILDDISPLAY=`getprop ro.build.display.id`
-
-ModulePropDescription="Restore selected CN HyperOS components for HyperOS 3."
-sed -i "s/<DESCRIPTION>/${ModulePropDescription}/g" $MODPATH/module.prop
-
-log_section "Module"
-log_item "${LANG_PROJECTNAME} $MODVERSION"
-log_item "Target: HyperOS 3.x, any device/build"
-log_item "Current: ${HYPEROSVERSION:-unknown} / $MIUIVERSION / API $API"
-waiting 1
-
-log_section "Compatibility"
-if ! $BOOTMODE ;then
-    log_warn "Install from a Magisk/KernelSU/APatch module manager."
+if [ "${BOOTMODE:-false}" != "true" ]; then
+    log_warn "請從 Magisk、KernelSU、SukiSU 或 APatch 的模組管理器安裝。"
     fail_install
 fi
 
-if [ -e $MODDIR/disable ] ;then
-    log_warn "Existing disabled module found. Enable or remove it first."
+UPSTREAM_MODULE="$NVBASE/modules/HyperOS3EULocalization"
+if [ -d "$UPSTREAM_MODULE" ] && [ ! -e "$UPSTREAM_MODULE/disable" ]; then
+    log_warn "偵測到原版 HyperOS3EULocalization，請先停用或移除，避免兩個模組掛載同一路徑。"
     fail_install
 fi
 
-if [ -e $MODDIR/system/etc/localization/AuthManager ] ;then
-    log_warn "Old AuthManager mode detected. Remove the old module first."
-    fail_install
+STANDALONE_TAPLUS="$NVBASE/modules/taplus_intl_fix"
+if [ -d "$STANDALONE_TAPLUS" ] && [ ! -e "$STANDALONE_TAPLUS/disable" ] && [ ! -e "$STANDALONE_TAPLUS/remove" ]; then
+    log_warn "偵測到獨立 taplus_intl_fix；v1.0.2 已內建相同 hook，安裝後請移除舊模組。"
 fi
 
-if [ -e "$MODPATH/HyperOS3EULocalization.ini" ]; then
-    . "$MODPATH/HyperOS3EULocalization.ini"
-elif [ -e "$MODPATH/MiuiEuLocalization.ini" ]; then
-    . "$MODPATH/MiuiEuLocalization.ini"
-elif [ -e /sdcard/Download/MiuiEuLocalization.ini ]; then
-    . /sdcard/Download/MiuiEuLocalization.ini
-else
-    log_warn "Config not found, using defaults."
+if [ "$BUILDHOST" != "xiaomi.eu" ]; then
+    log_warn "未偵測到 xiaomi.eu build host，仍會繼續安裝。"
 fi
 
-if [[ $BUILDHOST != "xiaomi.eu" ]] ;then
-    log_warn "xiaomi.eu build host was not detected. Continuing."
-fi
+case "$MIUIVERSION $HYPEROSVERSION $BUILDDISPLAY" in
+    *OS3*|*os3*) ;;
+    *)
+        case "$HYPEROSVERSION" in
+            3*) ;;
+            *) log_warn "未偵測到 HyperOS 3，仍會繼續安裝。" ;;
+        esac
+        ;;
+esac
 
-if [[ "$MIUIVERSION $HYPEROSVERSION $BUILDDISPLAY" != *"OS3"* && "$HYPEROSVERSION" != 3* ]] ;then
-    log_warn "HyperOS 3 was not detected from system properties. Continuing."
-fi
+REQUIRED_PAYLOADS="
+system/product/app/VoiceAssistAndroidT
+system/product/app/AiAsstVision
+system/product/app/MIUIAiasstService
+system/product/priv-app/MIUIContentExtension
+system/product/app/MINextpay
+system/product/app/MITSMClient
+system/product/app/MipayWallet
+system/product/app/UPTsmService
+system/product/app/PaymentService
+"
 
-Mipay=${Mipay:-false}
-AppStore=${AppStore:-false}
-HybridPlatform=${HybridPlatform:-false}
-ContentExtension=${ContentExtension:-false}
-PersonalAssistant=${PersonalAssistant:-false}
-Mms=${Mms:-false}
-YellowPage=${YellowPage:-false}
-AiAsst=${AiAsst:-false}
-VoiceAssist=${VoiceAssist:-false}
-RemoveMod=${RemoveMod:-false}
-
-if [ ! -e "$MODPATH/system/product/app/MINextpay" ] || [ ! -e "$MODPATH/system/product/app/MITSMClient" ] || [ ! -e "$MODPATH/system/product/app/MipayWallet" ] || [ ! -e "$MODPATH/system/product/app/UPTsmService" ] || [ ! -e "$MODPATH/system/product/app/PaymentService" ] ;then
-    Mipay=false
-    log_warn "Smart-card payload incomplete; disabling Xiaomi smart card."
-fi
-
-if [ ! -e "$MODPATH/system/product/app/MIUISuperMarket" ] ;then
-    AppStore=false
-    log_warn "Xiaomi App Store payload missing; disabling App Store."
-fi
-
-if bool_enabled "$AiAsst" ;then
-    YellowPage=true
-fi
-
-if bool_enabled "$Mms" || bool_enabled "$ContentExtension" || bool_enabled "$PersonalAssistant" || bool_enabled "$AiAsst" || bool_enabled "$VoiceAssist" || bool_enabled "$YellowPage" ;then
-    RemoveMod=true
-fi
-
-if bool_enabled "$RemoveMod" ;then
-    Contacts=true
-else
-    Contacts=false
-fi
-
-if bool_enabled "$PersonalAssistant" || bool_enabled "$ContentExtension" ;then
-    MiuiContentCatcher=true
-else
-    MiuiContentCatcher=false
-fi
-
-if bool_enabled "$ContentExtension" ;then
-    CatcherPatch=true
-else
-    CatcherPatch=false
-fi
-
-mkdir -p "$MODPATH/system/etc/localization"
-touch "$MODPATH/system/etc/localization/SelectionSaved"
-
-log_section "Selected"
-enabled_summary=""
-for item in Mipay AppStore HybridPlatform ContentExtension PersonalAssistant Mms YellowPage AiAsst VoiceAssist RemoveMod; do
-    eval "item_value=\${$item:-false}"
-    if bool_enabled "$item_value" ;then
-        mark_selected "$item"
-        enabled_summary="$enabled_summary $item"
+log_item "檢查固定 payload"
+for payload in $REQUIRED_PAYLOADS; do
+    if [ ! -d "$MODPATH/$payload" ]; then
+        log_warn "缺少 $payload"
+        fail_install
     fi
 done
-if [ -n "$enabled_summary" ]; then
-    log_item "${enabled_summary# }"
-else
-    log_item "No optional payloads selected"
+
+if [ ! -f "$MODPATH/zygisk/arm64-v8a.so" ]; then
+    log_warn "缺少 Taplus Zygisk arm64 binary"
+    fail_install
 fi
 
-log_section "Payloads"
-if ! bool_enabled "$Mipay" ;then
-    remove_path "system/product/app/MINextpay"
-    remove_path "system/product/app/MITSMClient"
-    remove_path "system/product/app/MipayWallet"
-    remove_path "system/product/app/UPTsmService"
-    remove_path "system/product/app/PaymentService"
-fi
-
-if ! bool_enabled "$AppStore" ;then
-    remove_path "system/product/app/MIUISuperMarket"
-fi
-
-if ! bool_enabled "$HybridPlatform" ;then
-    remove_path "system/product/app/HybridPlatform"
-fi
-
-if ! bool_enabled "$ContentExtension" ;then
-    remove_path "system/product/priv-app/MIUIContentExtension"
-fi
-
-if ! bool_enabled "$PersonalAssistant" ;then
-    remove_path "system/product/priv-app/PersonalAssistant"
-fi
-
-if ! bool_enabled "$Mms" ;then
-    remove_path "system/product/priv-app/Mms"
-fi
-
-if ! bool_enabled "$YellowPage" ;then
-    remove_path "system/product/priv-app/MIUIYellowPage"
-fi
-
-if ! bool_enabled "$AiAsst" ;then
-    remove_path "system/product/app/MIUIAiasstService"
-fi
-
-if ! bool_enabled "$VoiceAssist" ;then
-    remove_path "system/product/app/AiAsstVision"
-    remove_path "system/product/app/VoiceAssistAndroidT"
-    remove_path "system/product/app/MIUIAiasstService"
-fi
-
-if ! bool_enabled "$Contacts" ;then
-    remove_path "system/priv-app/Contacts"
-fi
-
-if bool_enabled "$RemoveMod" ;then
-    mkdir -p "$MODPATH/system/priv-app/CleanMaster"
-    touch "$MODPATH/system/priv-app/CleanMaster/CleanMaster.apk"
-    mkdir -p "$MODPATH/system/product/priv-app/CleanMaster"
-    touch "$MODPATH/system/product/priv-app/CleanMaster/CleanMaster.apk"
-else
-    remove_path "system/vendor/camera"
-fi
-
-if ! bool_enabled "$MiuiContentCatcher" ;then
-    remove_path "system/system_ext/app/MiuiContentCatcher"
-fi
-
-if ! bool_enabled "$CatcherPatch" ;then
-    remove_path "system/system_ext/app/CatcherPatch"
-fi
-
-echo "" >> $MODPATH/system.prop
-
-if bool_enabled "$Mipay" ;then
-    echo "ro.se.type=eSE,HCE,UICC" >> $MODPATH/system.prop
-fi
-
-if bool_enabled "$AiAsst" ;then
-    echo "ro.vendor.audio.aiasst.support=true" >> $MODPATH/system.prop
-fi
-
-if bool_enabled "$RemoveMod" ;then
-    echo "ro.product.mod_device=xiaomieu" >> $MODPATH/system.prop
-    echo "ro.miui.region=CN" >> $MODPATH/system.prop
-fi
-
-echo "" >> $MODPATH/system.prop
-echo "moe.minamigo.miuieulocalization=$MODVERSION" >> $MODPATH/system.prop
-
-log_section "Data cleanup"
-if bool_enabled "$PersonalAssistant" ;then
-    if [ ! -e $MODDIR/system/etc/localization/PersonalAssistant ] ;then
-        rm -rf /data/data/com.miui.personalassistant/*
-    fi
-else
-    if [ -e $MODDIR/system/etc/localization/PersonalAssistant ] ;then
-        rm -rf /data/data/com.miui.personalassistant/*
-    fi
-fi
-
-if bool_enabled "$Mms" ;then
-    if [ ! -e $MODDIR/system/etc/localization/Mms ] ;then
-        rm -rf /data/data/com.android.mms/*
-    fi
-else
-    if [ -e $MODDIR/system/etc/localization/Mms ] ;then
-        rm -rf /data/data/com.android.mms/*
-    fi
-fi
-
-if bool_enabled "$Contacts" ;then
-    if [ ! -e $MODDIR/system/etc/localization/Contacts ] ;then
-        rm -rf /data/data/com.android.contacts/*
-    fi
-else
-    if [ -e $MODDIR/system/etc/localization/Contacts ] ;then
-        rm -rf /data/data/com.android.contacts/*
-    fi
+if [ ! -f "$MODPATH/excluded_packages.txt" ]; then
+    log_warn "缺少 Taplus Zygisk 排除清單"
+    fail_install
 fi
 
 mkdir -p "$MODPATH/system/etc/localization/SystemVersion"
+touch "$MODPATH/system/etc/localization/XiaoAI"
+touch "$MODPATH/system/etc/localization/ContentExtension"
+touch "$MODPATH/system/etc/localization/Mipay"
 touch "$MODPATH/system/etc/localization/SystemVersion/$SYSTEM_VERSION"
+
+# Mi Pay 的安全元件類型與小愛服務開關。
+# 地區與 mod_device 完全沿用 ROM，不強迫切到 CN。
+cat > "$MODPATH/system.prop" <<EOF
+ro.se.type=eSE,HCE,UICC
+ro.vendor.audio.aiasst.support=true
+jason.hyperos3.eu.core=$MODVERSION
+EOF
+
 rm -rf /data/system/package_cache/*
 
-log_item "Done"
-waiting 1
+log_item "已安裝：小愛語音／視覺／服務、傳送門、Mi Pay 完整鏈路"
+log_item "已加入：Taplus 國際版 Zygisk 修復與 App 語系設定"
