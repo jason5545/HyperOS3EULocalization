@@ -22,6 +22,10 @@ system/product/app/MINextpay
 system/product/app/MITSMClient
 system/product/app/UPTsmService
 system/product/app/PaymentService
+system/product/priv-app/MiuiGallery
+system/product/app/MiMediaEditor
+system/product/priv-app/SoundRecorder
+system/product/app/ThemeManager
 "
 
 EXCLUDED_PATHS="

@@ -63,6 +63,10 @@ system/product/app/MINextpay
 system/product/app/MITSMClient
 system/product/app/UPTsmService
 system/product/app/PaymentService
+system/product/priv-app/MiuiGallery
+system/product/app/MiMediaEditor
+system/product/priv-app/SoundRecorder
+system/product/app/ThemeManager
 "
 
 log_item "檢查固定 payload"
@@ -75,6 +79,10 @@ done
 
 # v1.0.2 早期版本曾包含小米錢包；更新時明確清掉舊 payload。
 rm -rf "$MODPATH/system/product/app/MipayWallet"
+
+# ThemeManager 在 MYRON xiaomi.eu 的原始路徑是 /product/app；清掉其他 fork
+# 使用的 /system/app 位置，避免同包名兩份 APK 並存。
+rm -rf "$MODPATH/system/app/ThemeManager"
 
 if [ ! -f "$MODPATH/zygisk/arm64-v8a.so" ]; then
     log_warn "缺少 Taplus Zygisk arm64 binary"
@@ -90,6 +98,10 @@ mkdir -p "$MODPATH/system/etc/localization/SystemVersion"
 touch "$MODPATH/system/etc/localization/XiaoAI"
 touch "$MODPATH/system/etc/localization/ContentExtension"
 touch "$MODPATH/system/etc/localization/Mipay"
+touch "$MODPATH/system/etc/localization/Gallery"
+touch "$MODPATH/system/etc/localization/MediaEditor"
+touch "$MODPATH/system/etc/localization/SoundRecorder"
+touch "$MODPATH/system/etc/localization/ThemeManager"
 touch "$MODPATH/system/etc/localization/SystemVersion/$SYSTEM_VERSION"
 
 # Mi Pay 的安全元件類型與小愛服務開關。
@@ -102,5 +114,10 @@ EOF
 
 rm -rf /data/system/package_cache/*
 
-log_item "已安裝：小愛語音／視覺／服務、傳送門、智慧卡與必要支付服務"
+if ! pm path org.lsposed.corepatch >/dev/null 2>&1; then
+    log_warn "未偵測到 CorePatch；開機後會改用 pm install -r -d -g 補裝國行 App，結果寫入 cn_media_install.log。"
+fi
+
+log_item "已安裝：小愛、傳送門、智慧卡支付鏈路"
+log_item "已安裝：國行相簿、相簿編輯器、錄音機與主題商店"
 log_item "已加入：Taplus 國際版 Zygisk 修復與 App 語系設定"
