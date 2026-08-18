@@ -1,5 +1,6 @@
 # v1.0.2 Taplus Zygisk hook 排除清單
-# 一行一個 package name，這些進程會跳過 IS_INTERNATIONAL_BUILD 翻轉（保留國際版行為，避免 CN 專屬入口）
+# 一行一個 package name；主進程與 :suffix 子進程都會排除。
+# 一般排除會跳過 flip 並卸載本模組 library；Wallet / GMS 另強制 denylist unmount。
 # 部署位置：/data/adb/modules/HyperOS3EUXiaoAiPortalMiPay/excluded_packages.txt
 # 修改後免重開機，重啟該 app 即生效
 com.miui.home
@@ -11,3 +12,5 @@ com.miui.packageinstaller
 com.miui.securitycenter
 com.android.phone
 com.android.systemui
+com.google.android.apps.walletnfcrel
+com.google.android.gms

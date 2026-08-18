@@ -22,10 +22,14 @@ system/product/app/MINextpay
 system/product/app/MITSMClient
 system/product/app/UPTsmService
 system/product/app/PaymentService
-system/product/priv-app/MiuiGallery
-system/product/app/MiMediaEditor
-system/product/priv-app/SoundRecorder
 system/product/app/ThemeManager
+"
+
+DATA_APP_PAYLOADS="
+payload/cn-media/MiuiGallery.apk
+payload/cn-media/MiMediaEditor.apk
+payload/cn-media/SoundRecorder.apk
+payload/cn-media/MiuiThemeManagerCnOverlay.apk
 "
 
 EXCLUDED_PATHS="
@@ -35,6 +39,11 @@ system/product/app/MipayWallet
 system/product/priv-app/PersonalAssistant
 system/product/priv-app/Mms
 system/product/priv-app/MIUIYellowPage
+system/product/priv-app/MiuiGallery
+system/product/app/MiMediaEditor
+system/product/priv-app/SoundRecorder
+system/product/data-app
+post-fs-data.sh
 "
 
 for payload in $REQUIRED_PAYLOADS; do
@@ -45,6 +54,13 @@ for payload in $REQUIRED_PAYLOADS; do
     PAYLOAD_APK_COUNT=$(find "$ROOT_DIR/$payload" -type f -name '*.apk' | wc -l | tr -d ' ')
     if [ "$PAYLOAD_APK_COUNT" != "1" ]; then
         echo "$payload 應該正好包含 1 個 APK，目前找到 $PAYLOAD_APK_COUNT 個" >&2
+        exit 1
+    fi
+done
+
+for payload in $DATA_APP_PAYLOADS; do
+    if [ ! -f "$ROOT_DIR/$payload" ]; then
+        echo "缺少必要 data-app payload: $payload" >&2
         exit 1
     fi
 done
@@ -80,6 +96,7 @@ zip -qr "$OUTPUT_PATH" \
     excluded_packages.txt \
     zygisk/arm64-v8a.so \
     $REQUIRED_PAYLOADS \
+    $DATA_APP_PAYLOADS \
     LICENSE
 
 echo "$OUTPUT_PATH"

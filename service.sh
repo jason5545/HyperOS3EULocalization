@@ -20,52 +20,62 @@ while [ "$(getprop sys.boot_completed)" != "1" ] && [ "$BOOT_WAIT" -lt 120 ]; do
     BOOT_WAIT=$((BOOT_WAIT + 1))
 done
 
-# CorePatch 存在時，由 systemless 掛載與它處理 xiaomi.eu / 國行簽章差異。
-# 沒有 CorePatch 時，改用 mikal fork 的開機後 pm install 補裝流程。
-force_install_cn_media() {
-    INSTALL_TMP=/data/local/tmp/jrc_cn_media_install
-    INSTALL_MARKER="$MODDIR/system/etc/localization/.cn_media_pm_installed_$SYSTEM_VERSION"
-    INSTALL_LOG="$MODDIR/cn_media_install.log"
+# Gallery / MediaEditor / SoundRecorder 走正常 /data/app 安裝，讓 Android
+# 自己解出 native libraries；不要建立額外 bind mount，避免支付 App 看見
+# KernelSU 模組掛載。ThemeManager 因 shared UID/重複 permission 保留 systemless。
+MEDIA_PAYLOAD_DIR="$MODDIR/payload/cn-media"
+MEDIA_INSTALL_TMP=/data/local/tmp/jrc_cn_media_install
+MEDIA_INSTALL_LOG="$MODDIR/cn_media_install.log"
 
-    if [ -f "$INSTALL_MARKER" ]; then
+installed_version_code() {
+    dumpsys package "$1" 2>/dev/null \
+        | sed -n 's/.*versionCode=\([0-9][0-9]*\).*/\1/p' \
+        | head -n 1
+}
+
+ensure_data_app() {
+    PACKAGE_NAME="$1"
+    APK_NAME="$2"
+    EXPECTED_VERSION="$3"
+    APK_PATH="$MEDIA_PAYLOAD_DIR/$APK_NAME"
+
+    if [ "$(installed_version_code "$PACKAGE_NAME")" = "$EXPECTED_VERSION" ]; then
+        return
+    fi
+    if [ ! -f "$APK_PATH" ]; then
+        echo "MISSING: $APK_PATH" >> "$MEDIA_INSTALL_LOG"
         return
     fi
 
-    mkdir -p "$INSTALL_TMP"
-    echo "=== CN media fallback: $(date) ===" > "$INSTALL_LOG"
-
-    for APK_PATH in \
-        "$MODDIR/system/product/priv-app/MiuiGallery/MIUIGallery.apk" \
-        "$MODDIR/system/product/app/MiMediaEditor/MiMediaEditor.apk" \
-        "$MODDIR/system/product/priv-app/SoundRecorder/SoundRecorder.apk" \
-        "$MODDIR/system/product/app/ThemeManager/ThemeManager.apk"; do
-        if [ ! -f "$APK_PATH" ]; then
-            echo "MISSING: $APK_PATH" >> "$INSTALL_LOG"
-            continue
-        fi
-
-        APK_NAME="$(basename "$APK_PATH")"
-        TMP_APK="$INSTALL_TMP/$APK_NAME"
-        cp "$APK_PATH" "$TMP_APK"
-
-        if pm install -r -d -g "$TMP_APK" >> "$INSTALL_LOG" 2>&1; then
-            echo "SUCCESS: $APK_NAME" >> "$INSTALL_LOG"
-        elif pm install -d -g "$TMP_APK" >> "$INSTALL_LOG" 2>&1; then
-            echo "SUCCESS (fresh): $APK_NAME" >> "$INSTALL_LOG"
-        else
-            echo "FAILED: $APK_NAME" >> "$INSTALL_LOG"
-        fi
-
-        rm -f "$TMP_APK"
-    done
-
-    rm -rf "$INSTALL_TMP"
-    touch "$INSTALL_MARKER"
+    mkdir -p "$MEDIA_INSTALL_TMP"
+    TMP_APK="$MEDIA_INSTALL_TMP/$APK_NAME"
+    cp "$APK_PATH" "$TMP_APK"
+    if pm install -r -d -g "$TMP_APK" >> "$MEDIA_INSTALL_LOG" 2>&1; then
+        echo "SUCCESS: $PACKAGE_NAME -> $EXPECTED_VERSION" >> "$MEDIA_INSTALL_LOG"
+    else
+        echo "FAILED: $PACKAGE_NAME -> $EXPECTED_VERSION" >> "$MEDIA_INSTALL_LOG"
+    fi
+    rm -f "$TMP_APK"
 }
 
-if ! pm path org.lsposed.corepatch >/dev/null 2>&1; then
-    force_install_cn_media
+echo "=== CN media ensure: $(date) ===" > "$MEDIA_INSTALL_LOG"
+ensure_data_app com.miui.gallery MiuiGallery.apk 5000507
+ensure_data_app com.miui.mediaeditor MiMediaEditor.apk 203990083
+ensure_data_app com.android.soundrecorder SoundRecorder.apk 708093
+
+# 官方 308 static overlay 在 hybrid_mount 環境可能無法新增到 /product/overlay；
+# 改由 Package Manager 安裝並讓 OverlayManager 啟用。
+THEME_OVERLAY_PACKAGE=com.android.thememanager.customthemeconfig.config.overlay
+THEME_OVERLAY_APK="$MEDIA_PAYLOAD_DIR/MiuiThemeManagerCnOverlay.apk"
+if ! pm path "$THEME_OVERLAY_PACKAGE" >/dev/null 2>&1 && [ -f "$THEME_OVERLAY_APK" ]; then
+    mkdir -p "$MEDIA_INSTALL_TMP"
+    cp "$THEME_OVERLAY_APK" "$MEDIA_INSTALL_TMP/MiuiThemeManagerCnOverlay.apk"
+    pm install -r -d -g "$MEDIA_INSTALL_TMP/MiuiThemeManagerCnOverlay.apk" \
+        >> "$MEDIA_INSTALL_LOG" 2>&1
+    rm -f "$MEDIA_INSTALL_TMP/MiuiThemeManagerCnOverlay.apk"
 fi
+cmd overlay enable --user 0 "$THEME_OVERLAY_PACKAGE" >/dev/null 2>&1
+rm -rf "$MEDIA_INSTALL_TMP"
 
 set_app_locale() {
     PACKAGE_NAME="$1"
