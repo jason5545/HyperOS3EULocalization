@@ -21,8 +21,11 @@ LOCAL_C_INCLUDES := \
     $(LOCAL_PATH)/vendor/xz/src/linux/include/linux \
     $(LOCAL_PATH)/vendor/xz/src/userspace \
     $(LOCAL_PATH)/$(XZ_DIR)
-LOCAL_CPPFLAGS   := -std=c++17 -fno-exceptions -fno-rtti -O2
-LOCAL_CFLAGS     := -DXZ_USE_CRC64
+LOCAL_CPPFLAGS   := -std=c++17 -fno-exceptions -fno-rtti -O2 -fvisibility=hidden
+LOCAL_CFLAGS     := -DXZ_USE_CRC64 -fvisibility=hidden
 LOCAL_STATIC_LIBRARIES := dobby
+# 官方 Zygisk 規範要求模組不把 STL/第三方符號洩漏到宿主進程的動態符號表；
+# entry point 在 zygisk.hpp 內以 visibility("default") 保留，其餘全部隱藏。
+LOCAL_LDFLAGS    := -Wl,--exclude-libs,ALL
 LOCAL_LDLIBS     := -llog -ldl
 include $(BUILD_SHARED_LIBRARY)
