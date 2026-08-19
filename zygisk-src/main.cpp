@@ -13,6 +13,8 @@
 // - 所有 JNI 呼叫檢查例外並 ExceptionClear，絕不讓例外逸出到 app
 // - 類/欄位不存在（非對應 ThemeManager 版本）時靜默跳過
 // - 不修改任何 prop、不碰 /system*
+// - Wallet / Play Store / GMS（含 .unstable，DroidGuard 所在）進程：
+//   最先處理，立即 force denylist unmount + dlclose，不做任何修改
 
 #include <jni.h>
 #include <android/log.h>
@@ -174,6 +176,18 @@ public:
             clearException(env_);
             return;
         }
+        // 支付／完整性檢查進程第一優先處理：不做任何檔案 I/O、不翻 Build
+        // 欄位，立刻要求系統卸載所有模組掛載並 dlclose 本模組 library，
+        // 讓這類進程從 specialization 結束起就完全看不見本模組。
+        if (isSensitiveProcess(nice)) {
+            skip_ = true;
+            api_->setOption(zygisk::FORCE_DENYLIST_UNMOUNT);
+            api_->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
+            LOGI("%s: sensitive, force denylist unmount and unload module", nice);
+            env_->ReleaseStringUTFChars(args->nice_name, nice);
+            return;
+        }
+
         theme_manager_ = strcmp(nice, "com.android.thememanager") == 0;
         // 雙喚醒目標進程：精確辨識，絕不影響其他 app。
         core_alive_ = strcmp(nice, "com.miui.voiceassist:voice_trigger") == 0;
@@ -186,16 +200,8 @@ public:
             // 也不能 DLCLOSE 自己。
             skip_ = false;
         }
-        const bool sensitive = isSensitiveProcess(nice);
-        if (sensitive) {
-            // Payment / integrity processes should see neither systemless mounts
-            // nor this module's mapped library.
-            skip_ = true;
-            api_->setOption(zygisk::FORCE_DENYLIST_UNMOUNT);
-        }
         if (skip_) {
-            LOGI("%s: excluded, unload module%s", nice,
-                 sensitive ? " and force denylist unmount" : "");
+            LOGI("%s: excluded, unload module", nice);
             api_->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
         }
         if (voice_trigger_) {
@@ -229,9 +235,18 @@ private:
     }
 
     static bool isSensitiveProcess(const char *nice_name) {
+        // gms 除了主進程與 :子進程，還有用「.」命名的獨立 process，
+        // 最重要的是 com.google.android.gms.unstable（DroidGuard /
+        // Play Integrity 實際執行處）；三者都必須涵蓋。
+        constexpr const char *kGms = "com.google.android.gms";
+        const size_t gms_length = strlen(kGms);
+        if (strncmp(nice_name, kGms, gms_length) == 0) {
+            const char tail = nice_name[gms_length];
+            if (tail == '\0' || tail == ':' || tail == '.') return true;
+        }
         return matchesPackageProcess(nice_name,
                                      "com.google.android.apps.walletnfcrel") ||
-               matchesPackageProcess(nice_name, "com.google.android.gms");
+               matchesPackageProcess(nice_name, "com.android.vending");
     }
 
     static bool isExcluded(const char *nice_name) {

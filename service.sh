@@ -116,20 +116,26 @@ if [ "$(settings get global voice_trigger_enabled)" = "1" ]; then
         : # 小愛已是預設助理：官方 VoiceInteractionService 鏈自己會處理
         ;;
     *)
-        DUALWAKE_RETRY=0
-        while [ "$DUALWAKE_RETRY" -lt 3 ]; do
-            sleep 60
-            if dumpsys activity services com.miui.voicetrigger 2>/dev/null \
-                    | grep -q "VoiceTriggerService"; then
-                break
-            fi
-            DUALWAKE_RETRY=$((DUALWAKE_RETRY + 1))
-            echo "retry $DUALWAKE_RETRY: re-deliver BootupReceiver $(date)" \
-                >> "$DUALWAKE_LOG"
-            am broadcast -a android.intent.action.BOOT_COMPLETED \
-                -n com.miui.voiceassist/com.xiaomi.voiceassistant.voiceTrigger.adapter.BootupReceiver \
-                >> "$DUALWAKE_LOG" 2>&1
-        done
+        # 改成獨立背景 worker，service.sh 本體立刻結束：避免開機後數分鐘
+        # （支付 App 首次啟動的敏感窗口）系統裡常駐一個 cmdline 帶
+        # /data/adb/modules 路徑的 root shell。重試邏輯與原本完全相同，
+        # 記錄檔路徑走環境變數，不出現在 worker 的 cmdline。
+        DUALWAKE_LOG="$DUALWAKE_LOG" nohup sh -c '
+            RETRY=0
+            while [ "$RETRY" -lt 3 ]; do
+                sleep 60
+                if dumpsys activity services com.miui.voicetrigger 2>/dev/null \
+                        | grep -q "VoiceTriggerService"; then
+                    break
+                fi
+                RETRY=$((RETRY + 1))
+                echo "retry $RETRY: re-deliver BootupReceiver $(date)" \
+                    >> "$DUALWAKE_LOG"
+                am broadcast -a android.intent.action.BOOT_COMPLETED \
+                    -n com.miui.voiceassist/com.xiaomi.voiceassistant.voiceTrigger.adapter.BootupReceiver \
+                    >> "$DUALWAKE_LOG" 2>&1
+            done
+        ' >/dev/null 2>&1 &
         ;;
     esac
 fi
