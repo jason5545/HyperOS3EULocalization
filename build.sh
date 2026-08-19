@@ -80,6 +80,11 @@ if [ ! -f "$ROOT_DIR/zygisk/arm64-v8a.so" ]; then
     exit 1
 fi
 
+if [ ! -f "$ROOT_DIR/zygisk/liblsplant.so" ]; then
+    echo "缺少 VoiceTrigger hook 用的 LSPlant runtime: zygisk/liblsplant.so" >&2
+    exit 1
+fi
+
 if [ ! -f "$ROOT_DIR/excluded_packages.txt" ]; then
     echo "缺少 Taplus 排除清單: excluded_packages.txt" >&2
     exit 1
@@ -105,6 +110,7 @@ zip -qr "$OUTPUT_PATH" \
     tools/unity_install.sh \
     excluded_packages.txt \
     zygisk/arm64-v8a.so \
+    zygisk/liblsplant.so \
     $REQUIRED_PAYLOADS \
     $DATA_APP_PAYLOADS \
     LICENSE

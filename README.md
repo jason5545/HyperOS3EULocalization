@@ -42,7 +42,7 @@ ZIP 內固定包含十四個 App payload，另有小愛預設助理與 ThemeMana
 
 `VoiceAssistAndroidOverlay` 只把 framework 的 `config_defaultAssistant` 預設值設為 `com.miui.voiceassist`。它不移除其他 `VoiceInteractionService`，也不覆寫使用者已明確選好的助理。實機同時可解析 Google、小愛與 ChatGPT；目前已選定的 Google 助理會維持原值，之後仍可在系統設定自由切換。
 
-v1.0.6 搭配 Jason 自用 HyperCeiler：在 `com.miui.voiceassist` scope 由 308 自己的 BootupReceiver 觸發官方 `CoreAliveManager` 註冊，讓服務由 `com.miui.voiceassist` 綁定，不用 root／shell 強啟、不切換預設助理、不清 App data，也不重錄聲紋；`com.miui.voicetrigger` scope 則把同一 session 的重複 `onResourcesAvailable` restart 做成冪等操作，避免已啟動 model 再次呼叫 `startRecognition()` 產生 `-38`。
+v1.0.7 起雙喚醒改由模組自己的 Zygisk 處理，不再需要 HyperCeiler／LSPosed。Zygisk 在 `com.miui.voiceassist:voice_trigger` 進程注入橋接類別，於主執行緒呼叫官方 `CoreAliveManager.registerAlive()`，讓 `VoiceTriggerService` 由 `com.miui.voiceassist` 自己綁定——不用 root／shell 強啟、不切換預設助理、不清 App data，也不重錄聲紋。在 `com.miui.voicetrigger` 進程則以 LSPlant 對 308 的 `restartRecognition`（`wakeup.q.k`）做真正的 ART method hook：同一 session 750ms 內的重複 restart 直接回 0，`-38`（INVALID_OPERATION，model 已 ACTIVE）視為成功；帶 versionCode `2026051416` 版本保護，目標不符時安全停用。
 
 MYRON 實機已確認 Google 維持預設助理時，小愛與 Hey Google 兩個 SoundTrigger model 可以同時保持 `ACTIVE`，兩邊都能收到真正的 `RECOGNITION` event。模組本身不再從 `service.sh` 直接啟動 VoiceTrigger；生命週期交回 308 的官方 CoreAlive 鏈。
 
@@ -158,7 +158,7 @@ ro.vendor.audio.aiasst.support=true
 - 可用的 systemless 掛載能力；KernelSU 可使用 Hybrid Mount 等掛載元模組
 - Zygisk Next；沒有它時 App payload 仍可掛載，但 Taplus 國際版修復不會生效
 - MYRON 上需 CorePatch，並在 LSPosed 對 `system` 啟用簽章、shared UID 與降版相容開關
-- 雙語音喚醒需 Jason 自用 HyperCeiler，LSPosed scope 勾選 `com.miui.voiceassist` 與 `com.miui.voicetrigger`
+- 雙語音喚醒由模組內建 Zygisk 處理（需 Zygisk Next），不依賴 HyperCeiler 或 LSPosed scope
 - arm64 裝置
 
 不要和原版 `HyperOS3EULocalization` 同時啟用，兩者會掛載相同路徑。安裝器偵測到原版仍啟用時會中止。

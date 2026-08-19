@@ -21,6 +21,7 @@
 #include <pthread.h>
 #include <unistd.h>
 
+#include "dualwake.h"
 #include "zygisk.hpp"
 
 #define LOG_TAG "TaplusIntlFix"
@@ -164,6 +165,8 @@ public:
     void preAppSpecialize(zygisk::AppSpecializeArgs *args) override {
         skip_ = false;
         theme_manager_ = false;
+        core_alive_ = false;
+        voice_trigger_ = false;
         if (!args || !args->nice_name) return;
 
         const char *nice = env_->GetStringUTFChars(args->nice_name, nullptr);
@@ -172,7 +175,17 @@ public:
             return;
         }
         theme_manager_ = strcmp(nice, "com.android.thememanager") == 0;
+        // 雙喚醒目標進程：精確辨識，絕不影響其他 app。
+        core_alive_ = strcmp(nice, "com.miui.voiceassist:voice_trigger") == 0;
+        voice_trigger_ = strcmp(nice, "com.miui.voicetrigger") == 0 ||
+                         strncmp(nice, "com.miui.voicetrigger:",
+                                 strlen("com.miui.voicetrigger:")) == 0;
         skip_ = isExcluded(nice);
+        if (core_alive_ || voice_trigger_) {
+            // 雙喚醒 worker 需要模組常駐；即使排除清單誤加這兩個 package，
+            // 也不能 DLCLOSE 自己。
+            skip_ = false;
+        }
         const bool sensitive = isSensitiveProcess(nice);
         if (sensitive) {
             // Payment / integrity processes should see neither systemless mounts
@@ -185,10 +198,16 @@ public:
                  sensitive ? " and force denylist unmount" : "");
             api_->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
         }
+        if (voice_trigger_) {
+            // 仍是 zygote 權限：先讀好 liblsplant.so，post 階段只需 memfd。
+            dualwakePreloadLsplant();
+        }
         env_->ReleaseStringUTFChars(args->nice_name, nice);
     }
 
     void postAppSpecialize(const zygisk::AppSpecializeArgs *args) override {
+        if (core_alive_) dualwakeStartCoreAlive(vm_);
+        if (voice_trigger_) dualwakeStartVoiceTrigger(vm_);
         if (theme_manager_) startThemeRegionWorker();
         if (!skip_) flipInternational();
     }
@@ -199,6 +218,8 @@ private:
     JavaVM *vm_ = nullptr;
     bool skip_ = false;
     bool theme_manager_ = false;
+    bool core_alive_ = false;
+    bool voice_trigger_ = false;
 
     static bool matchesPackageProcess(const char *nice_name,
                                       const char *package_name) {

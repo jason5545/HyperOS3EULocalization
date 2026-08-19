@@ -102,3 +102,34 @@ set_app_locale com.miui.gallery zh-TW,zh-CN zh-TW
 set_app_locale com.miui.mediaeditor zh-TW,zh-CN zh-TW
 set_app_locale com.android.soundrecorder zh-TW,zh-CN zh-TW
 set_app_locale com.android.thememanager zh-TW,zh-CN zh-TW
+
+# --- 雙喚醒冷開機保底 -------------------------------------------------------
+# 冷開機記憶體高峰時，MIUI 可能在 BootupReceiver 結束後數十毫秒內回收
+# com.miui.voiceassist:voice_trigger，讓 CoreAlive 內部的 bind 來不及執行。
+# 等系統穩定後檢查 VoiceTriggerService 是否已由小愛自己綁定；沒有才對
+# 小愛自己的 BootupReceiver 重送開機廣播（不直接啟動 VoiceTrigger 服務，
+# 不切預設助理；綁定仍由 308 官方 CoreAlive 鏈完成，caller 是小愛）。
+DUALWAKE_LOG="$MODDIR/dualwake_boot.log"
+if [ "$(settings get global voice_trigger_enabled)" = "1" ]; then
+    case "$(settings get secure voice_interaction_service)" in
+    com.miui.voiceassist/*)
+        : # 小愛已是預設助理：官方 VoiceInteractionService 鏈自己會處理
+        ;;
+    *)
+        DUALWAKE_RETRY=0
+        while [ "$DUALWAKE_RETRY" -lt 3 ]; do
+            sleep 60
+            if dumpsys activity services com.miui.voicetrigger 2>/dev/null \
+                    | grep -q "VoiceTriggerService"; then
+                break
+            fi
+            DUALWAKE_RETRY=$((DUALWAKE_RETRY + 1))
+            echo "retry $DUALWAKE_RETRY: re-deliver BootupReceiver $(date)" \
+                >> "$DUALWAKE_LOG"
+            am broadcast -a android.intent.action.BOOT_COMPLETED \
+                -n com.miui.voiceassist/com.xiaomi.voiceassistant.voiceTrigger.adapter.BootupReceiver \
+                >> "$DUALWAKE_LOG" 2>&1
+        done
+        ;;
+    esac
+fi

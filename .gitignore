@@ -27,6 +27,11 @@ scripts/*
 !scripts/build_zygisk.sh
 zygisk-src/libs/
 zygisk-src/obj/
+zygisk-src/build/
+zygisk-src/gen/
+zygisk-src/vendor/dobby/src/
+zygisk-src/vendor/dobby/build/
+.tmp-verify/
 
 # Python virtual environment
 .venv/
