@@ -13,6 +13,7 @@
 // - 所有 JNI 呼叫檢查例外並 ExceptionClear，絕不讓例外逸出到 app
 // - 類/欄位不存在（非對應 ThemeManager 版本）時靜默跳過
 // - 不修改任何 prop、不碰 /system*
+// - 預設無任何 logcat 輸出；敏感進程連除錯旗標都不讀，永遠靜默
 // - Wallet / Play Store / GMS（含 .unstable，DroidGuard 所在）進程：
 //   最先處理，立即 force denylist unmount + dlclose，不做任何修改
 
@@ -27,14 +28,23 @@
 #include "zygisk.hpp"
 
 #define LOG_TAG "TaplusIntlFix"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
+// 預設完全靜默：logcat 不該留下任何模組足跡。
+// 除錯時建立空檔 /data/adb/modules/HyperOS3EUXiaoAiPortalMiPay/debug 才輸出，
+// 且只對非敏感進程生效（敏感進程永不讀檔、永不輸出）。
+#define LOGI(...) do { if (g_debug) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__); } while (0)
+#define LOGW(...) do { if (g_debug) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__); } while (0)
 
 namespace {
 
 // 可選排除清單：一行一個 package name（nice_name），# 開頭為註解
 constexpr const char *kExcludeFile =
         "/data/adb/modules/HyperOS3EUXiaoAiPortalMiPay/excluded_packages.txt";
+
+// 除錯旗標：存在即開啟 log。僅在非敏感進程的 preAppSpecialize 讀取一次
+// （當下仍是 zygote 權限，讀 /data/adb 不會留下 app 側的存取痕跡）。
+constexpr const char *kDebugFile =
+        "/data/adb/modules/HyperOS3EUXiaoAiPortalMiPay/debug";
+static bool g_debug = false;
 
 static bool clearException(JNIEnv *env) {
     if (!env->ExceptionCheck()) return false;
@@ -176,17 +186,19 @@ public:
             clearException(env_);
             return;
         }
-        // 支付／完整性檢查進程第一優先處理：不做任何檔案 I/O、不翻 Build
-        // 欄位，立刻要求系統卸載所有模組掛載並 dlclose 本模組 library，
-        // 讓這類進程從 specialization 結束起就完全看不見本模組。
+        // 支付／完整性檢查進程第一優先處理：不做任何檔案 I/O、不輸出任何
+        // log、不翻 Build 欄位，立刻要求系統卸載所有模組掛載並 dlclose
+        // 本模組 library，讓這類進程從 specialization 結束起就完全看不見本模組。
         if (isSensitiveProcess(nice)) {
             skip_ = true;
             api_->setOption(zygisk::FORCE_DENYLIST_UNMOUNT);
             api_->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
-            LOGI("%s: sensitive, force denylist unmount and unload module", nice);
             env_->ReleaseStringUTFChars(args->nice_name, nice);
             return;
         }
+
+        // 到這裡已確定不是敏感進程；仍是 zygote 權限，安全地讀一次除錯旗標。
+        g_debug = access(kDebugFile, F_OK) == 0;
 
         theme_manager_ = strcmp(nice, "com.android.thememanager") == 0;
         // 雙喚醒目標進程：精確辨識，絕不影響其他 app。
