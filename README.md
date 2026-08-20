@@ -1,10 +1,20 @@
 # HyperOS 3 EU 小愛・語音喚醒・AI 通話・傳送門・智慧卡・國行媒體
 
-這是 [LSHFGJ/HyperOS3EULocalization](https://github.com/LSHFGJ/HyperOS3EULocalization) 的量身精簡版，供 xiaomi.eu HyperOS 3 使用。
+這是 [LSHFGJ/HyperOS3EULocalization](https://github.com/LSHFGJ/HyperOS3EULocalization) 的 fork，但本地化策略與上游不同（見下節），供 xiaomi.eu HyperOS 3 使用。
 
 它補回小愛、語音喚醒、小米語音引擎、AI 通話、傳送門、智慧卡需要的元件，加入國行相簿、相簿編輯器、錄音機與主題商店，並修正國際版 ROM 無法觸發 Taplus 長按的問題。沒有音量鍵選單，也不會順手裝回負一屏、簡訊、黃頁、GetApps、快應用或小米錢包。
 
-目前版本是 `v1.0.12`。實機開發與驗證環境為 POCO F8 Ultra（myron）、xiaomi.eu `OS3.0.308.0.WPMCNXM`、Android 16、KernelSU 與 Zygisk Next。
+目前版本是 `v1.0.15`。實機開發與驗證環境為 POCO F8 Ultra（myron）、xiaomi.eu `OS3.0.308.0.WPMCNXM`、Android 16、KernelSU 與 Zygisk Next。
+
+## 與上游的差異
+
+保留 fork 關係，但「本地化」的思路和上游是兩條不同的路：
+
+- **上游補的是國行系統，這裡借的是國行功能。** 系統本體維持 xiaomi.eu 國際版行為：不改 `ro.miui.region`、不改 `ro.product.mod_device`、不換系統語言、不動全域 overlay。只有明確列出的元件換成國行版，其餘維持 EU 原樣。
+- **切換做在進程邊界上，不是全系統。** 需要中國版判斷的 App 只在它自己的 process 裡翻轉國際版旗標；Launcher、SystemUI、電話、支付、GMS 一律排除，GMS／Wallet 連模組 library 都會被卸載、連除錯旗標都不讀。某個 App 走中國版邏輯是逐一決定的例外，不是預設值。
+- **地區與語系是 per-app 的。** 國行 App 個別指定 `zh-CN`／`zh-TW`；ThemeManager 只覆寫 App 內的 API region cache。系統地區維持 `TW`，其他 App 完全不受影響。
+- **內容來自官方、可以滾動更新。** 國行元件取自官方 OTA 與小米商店更新管道，進模組前逐一驗證簽章與版本；官方出新版時沿用同一管道收錄更新，不把某次 dump 的版本永久凍結。
+- **無互動安裝。** 沒有音量鍵選單，ZIP 內容固定：裝了就是這一套，移除就回到 ROM 原狀。
 
 ## 模組內容
 
@@ -28,13 +38,13 @@ ZIP 內固定包含十四個 App payload，另有小愛預設助理與 ThemeMana
 | 國行錄音機 | `com.android.soundrecorder` | `system/product/priv-app/SoundRecorder` |
 | 國行主題商店 | `com.android.thememanager` | `system/product/app/ThemeManager` |
 
-新增的國行元件取自 MYRON 官方 `OS3.0.308.0.WPMCNXM` OTA。ThemeManager、VoiceTrigger 與小愛預設助理 overlay 走 systemless 原始路徑；語音引擎與相簿由開機服務安裝到正常 `/data/app`，讓 Android 自己處理 native libraries，不建立額外 bind mount。錄音機（v1.0.11 起）與編輯器（v1.0.12 起）改為 systemless：EU 308 底包內建版本的 versionCode 比國行版高，data-app 會被當成過期更新丟棄。
+新增的國行元件取自 MYRON 官方 `OS3.0.308.0.WPMCNXM` OTA 與小米商店更新管道。ThemeManager、VoiceTrigger 與小愛預設助理 overlay 走 systemless 原始路徑；語音引擎與相簿由開機服務安裝到正常 `/data/app`，讓 Android 自己處理 native libraries，不建立額外 bind mount。錄音機（v1.0.11 起）與編輯器（v1.0.12 起）改為 systemless：錄音機是 EU 底包內建版的 versionCode 比國行版高，data-app 會被當成過期更新丟棄；編輯器在 v1.0.13 已換上與 EU 同 versionCode 的國行 2.4.0.4.3，仍維持 systemless，避免日後 EU 升版時被靜默換回國際版。
 
 ### 語音喚醒、語音引擎與預設助理
 
 `com.miui.voicetrigger` 提供小愛的原生語音喚醒、聲紋訓練與設定入口。MYRON 的 Sound Trigger HAL 正常存在；模組只補回國行 APK，不偽造硬體 feature，也不加入推薦內容、`VoiceAssistProxy` 或其他小愛資訊流元件。
 
-主小愛使用 308 `7.12.2.0318`（`507012002`），小愛視覺使用 308 `5.12.4.20`（`540120420`），VoiceTrigger 與語音引擎也同步 308。AI 通話服務的 304／308 版本同為 `6.0.3`（`2535`），因此保留 xiaomi.eu 現有、帶相容語系的 APK，不做沒有版本收益的替換。
+主小愛自 v1.0.14 起改用商店更新的 `7.13.32.0016`（`507013032`），小愛視覺使用 308 `5.12.4.20`（`540120420`），VoiceTrigger 與語音引擎也同步 308。AI 通話服務自 v1.0.13 起改用商店更新的 `6.1.6`（`2721`）。
 
 308 的問題不是缺少 `VoiceAssistProxy` 或其他 companion，而是 `CoreAliveManager.registerAlive()` 原本只會從小愛的 `AssistInteractionService.onReady()` 呼叫。Google 維持預設助理時，Android 不會啟動小愛的 VoiceInteractionService，冷開機後也就沒有人綁定官方 `VoiceTriggerService`。
 
@@ -48,7 +58,7 @@ MYRON 實機已確認 Google 維持預設助理時，小愛與 Hey Google 兩個
 
 ### AI 通話
 
-AI 通話不是另一顆獨立 APK；它就在 `com.xiaomi.aiasst.service` 裡。模組沿用與目前 xiaomi.eu ROM 相容、帶繁中資源的同版本 APK，不以小米應用商店的較新版本覆蓋 ROM，避免 InCallUI、shared UID 或簽章相容問題。
+AI 通話不是另一顆獨立 APK；它就在 `com.xiaomi.aiasst.service` 裡。v1.0.13 起模組改用小米商店管道的 `6.1.6`（`2721`），與 ROM 同簽章家族、維持 systemless 掛載。
 
 電話 App 的原生 AI 通話項目會向 `com.xiaomi.aiasst.service.aicall.provider` 查詢可用狀態。本模組不偽裝 `ro.product.mod_device`；`com.xiaomi.aiasst.service` 也列入 Taplus 排除清單，不套用任何 Zygisk 欄位翻轉。AI 通話由小米官方 cloud-control 的機型規則、帳號、網路、權限與使用者開關決定可用性。`com.android.contacts`、`com.android.phone` 同樣保留在排除清單。
 
@@ -70,10 +80,10 @@ MYRON `OS3.0.308.0.WPMCNXM` 實機比對：
 
 | App | 模組國行版 | ROM 原版 | 變化 |
 | --- | --- | --- | --- |
-| Gallery | `5.0.5.7-0508-R` | `4.3.1.16-global` | 升級 |
-| MediaEditor | `2.3.0.8.3` | `2.4.0.4.3-global` | 降版 |
+| Gallery | `5.0.7.12-0815-R` | `4.3.1.16-global` | 升級 |
+| MediaEditor | `2.4.0.4.3` | `2.4.0.4.3-global` | 同版號，內容換國行 |
 | SoundRecorder | `7.8.9.3-bc34f3e22` | `7.8.9.9-643c0d7ef` | 降版 |
-| ThemeManager | `10.8.0.0` | `10.8.7.6` | 降版 |
+| ThemeManager | `10.8.7.6` | `10.8.7.6` | 同版號，內容換國行 |
 | AiAsstVision | `5.12.4.20` | `5.12.6.60` | 降版 |
 
 安裝器會清掉 Package Manager cache，但不會主動刪除這四個 App 的 user data。若降版後某個 App 因舊資料庫閃退，再只清該 App 的資料，不需要一次清四個。
