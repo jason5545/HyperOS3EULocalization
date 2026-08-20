@@ -63,6 +63,7 @@ the user's device without explicit approval.
   share label id 0x7f120126 — alignment luck, not a mechanism.
 - Data-app payloads are immune to the split (installed under /data/app, visible
   in every namespace) but only shadow EU stock when CN versionCode ≥ EU's. On
-  the EU 308 base, SoundRecorder (708093 < 708099) and MediaEditor
-  (203990083 < 204990043) can never win as data apps — both ship systemless
-  since v1.0.11/v1.0.12.
+  the EU 308 base, SoundRecorder (708093 < 708099) can never win as a data app
+  — it ships systemless since v1.0.11; MediaEditor stayed systemless after
+  v1.0.12 even though v1.0.13 bundles CN 204990043 (== EU's vc), because a
+  future EU bump would silently flip it back to stock if it were a data app.
