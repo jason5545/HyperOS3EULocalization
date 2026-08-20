@@ -67,3 +67,15 @@ the user's device without explicit approval.
   — it ships systemless since v1.0.11; MediaEditor stayed systemless after
   v1.0.12 even though v1.0.13 bundles CN 204990043 (== EU's vc), because a
   future EU bump would silently flip it back to stock if it were a data app.
+- CN updates that redeclare a permission an EU app already owns can never
+  install as data apps (`INSTALL_FAILED_DUPLICATE_PERMISSION`, e.g.
+  voiceassist 7.13.32 vs EU notes owning
+  `com.xiaomi.mihomemanager.permission.receiveBroadcast`). Systemless has no
+  such check (system scan tolerates duplicate declarations), so bumping the
+  bundled APK in `system/product/app/…` is the fix — v1.0.14 did this for
+  VoiceAssistAndroidT 507013032 and ThemeManager 10876.
+- GetApps (com.xiaomi.market) can drive CN updates itself, but only as a
+  priv-app with `INSTALL_PACKAGES` allowlisted (HyperOS 3 EU defines it
+  `signature|privileged`, so `pm grant` can't). The separate `getapps_priv`
+  module does this; without it every session dies at
+  `STATUS_PENDING_USER_ACTION` (market error 13).

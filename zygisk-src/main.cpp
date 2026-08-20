@@ -143,7 +143,12 @@ static void *themeRegionWorker(void *opaque) {
         if (clearException(env)) load_class = nullptr;
 
         if (class_loader && load_class) {
+            // 10.8.0.0: basemodule.utils.ld6；10.8.7.6 起類名改回 DeviceUtils，
+            // 區域快取欄位都叫 ld6。依序嘗試，命中任一即算成功。
             const bool retrofit_region = setStaticRegionField(
+                    env, class_loader, load_class,
+                    "com.android.thememanager.basemodule.utils.DeviceUtils", "ld6") ||
+                setStaticRegionField(
                     env, class_loader, load_class,
                     "com.android.thememanager.basemodule.utils.ld6", "ld6");
             applied = retrofit_region;
