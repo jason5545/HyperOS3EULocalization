@@ -19,20 +19,25 @@ system/product/app/VoiceTrigger
 system/product/app/AiAsstVision
 system/product/app/MIUIAiasstService
 system/product/priv-app/MIUIContentExtension
+system/product/priv-app/SoundRecorder
 system/product/app/MINextpay
 system/product/app/MITSMClient
 system/product/app/UPTsmService
 system/product/app/PaymentService
 system/product/app/ThemeManager
+system/product/app/MiMediaEditor
 system/product/overlay/VoiceAssistAndroidOverlay
 "
 
 DATA_APP_PAYLOADS="
 payload/cn-media/MiuiGallery.apk
-payload/cn-media/MiMediaEditor.apk
-payload/cn-media/SoundRecorder.apk
 payload/cn-media/MiuiThemeManagerCnOverlay.apk
 payload/xiaoai/MIUIXiaoAiSpeechEngine.apk
+"
+
+# 單檔 systemless payload：priv-app 授權 XML（補 CN 有、EU 缺的 grants）
+FILE_PAYLOADS="
+system/product/etc/permissions/privapp-permissions-hyperos3eu.xml
 "
 
 EXCLUDED_PATHS="
@@ -43,8 +48,6 @@ system/product/priv-app/PersonalAssistant
 system/product/priv-app/Mms
 system/product/priv-app/MIUIYellowPage
 system/product/priv-app/MiuiGallery
-system/product/app/MiMediaEditor
-system/product/priv-app/SoundRecorder
 system/product/data-app
 post-fs-data.sh
 "
@@ -61,9 +64,9 @@ for payload in $REQUIRED_PAYLOADS; do
     fi
 done
 
-for payload in $DATA_APP_PAYLOADS; do
+for payload in $DATA_APP_PAYLOADS $FILE_PAYLOADS; do
     if [ ! -f "$ROOT_DIR/$payload" ]; then
-        echo "缺少必要 data-app payload: $payload" >&2
+        echo "缺少必要單檔 payload: $payload" >&2
         exit 1
     fi
 done
@@ -113,6 +116,7 @@ zip -qr "$OUTPUT_PATH" \
     zygisk/liblsplant.so \
     $REQUIRED_PAYLOADS \
     $DATA_APP_PAYLOADS \
+    $FILE_PAYLOADS \
     LICENSE
 
 echo "$OUTPUT_PATH"

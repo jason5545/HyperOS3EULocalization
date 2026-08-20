@@ -4,7 +4,7 @@
 
 它補回小愛、語音喚醒、小米語音引擎、AI 通話、傳送門、智慧卡需要的元件，加入國行相簿、相簿編輯器、錄音機與主題商店，並修正國際版 ROM 無法觸發 Taplus 長按的問題。沒有音量鍵選單，也不會順手裝回負一屏、簡訊、黃頁、GetApps、快應用或小米錢包。
 
-目前版本是 `v1.0.6`。實機開發與驗證環境為 POCO F8 Ultra（myron）、xiaomi.eu `OS3.0.308.0.WPMCNXM`、Android 16、KernelSU 與 Zygisk Next。
+目前版本是 `v1.0.12`。實機開發與驗證環境為 POCO F8 Ultra（myron）、xiaomi.eu `OS3.0.308.0.WPMCNXM`、Android 16、KernelSU 與 Zygisk Next。
 
 ## 模組內容
 
@@ -24,11 +24,11 @@ ZIP 內固定包含十四個 App payload，另有小愛預設助理與 ThemeMana
 | 銀聯 TSM | `com.unionpay.tsmservice.mi` | `system/product/app/UPTsmService` |
 | 小米支付服務 | `com.xiaomi.payment` | `system/product/app/PaymentService` |
 | 國行相簿 | `com.miui.gallery` | `payload/cn-media/MiuiGallery.apk` |
-| 國行相簿編輯器 | `com.miui.mediaeditor` | `payload/cn-media/MiMediaEditor.apk` |
-| 國行錄音機 | `com.android.soundrecorder` | `payload/cn-media/SoundRecorder.apk` |
+| 國行相簿編輯器 | `com.miui.mediaeditor` | `system/product/app/MiMediaEditor` |
+| 國行錄音機 | `com.android.soundrecorder` | `system/product/priv-app/SoundRecorder` |
 | 國行主題商店 | `com.android.thememanager` | `system/product/app/ThemeManager` |
 
-新增的國行元件取自 MYRON 官方 `OS3.0.308.0.WPMCNXM` OTA。ThemeManager、VoiceTrigger 與小愛預設助理 overlay 走 systemless 原始路徑；語音引擎、相簿、編輯器與錄音機則由開機服務安裝到正常 `/data/app`，讓 Android 自己處理 native libraries，不建立額外 bind mount。
+新增的國行元件取自 MYRON 官方 `OS3.0.308.0.WPMCNXM` OTA。ThemeManager、VoiceTrigger 與小愛預設助理 overlay 走 systemless 原始路徑；語音引擎與相簿由開機服務安裝到正常 `/data/app`，讓 Android 自己處理 native libraries，不建立額外 bind mount。錄音機（v1.0.11 起）與編輯器（v1.0.12 起）改為 systemless：EU 308 底包內建版本的 versionCode 比國行版高，data-app 會被當成過期更新丟棄。
 
 ### 語音喚醒、語音引擎與預設助理
 
@@ -62,7 +62,7 @@ MYRON xiaomi.eu 內建四個國際版 App 的簽章 SHA-256 是 `f87bd41b…`，
 - 允許 shared UID 簽章不同（ThemeManager 使用 `android.uid.theme`）
 - 允許降版
 
-開機服務按 versionCode 確認相簿、編輯器與錄音機；版本不符時才執行 `pm install -r -d -g`，結果寫在模組目錄的 `cn_media_install.log`。ThemeManager 因 shared UID 與重複 permission 無法安全改走 `/data/app`，仍由 systemless overlay 提供，因此 MYRON 需要 CorePatch。
+開機服務按 versionCode 確認語音引擎與相簿；版本不符時才執行 `pm install -r -d -g`，結果寫在模組目錄的 `data_app_install.log`。錄音機與編輯器若還有舊的 `/data/app` 安裝，開機服務會卸除，讓 systemless 版本生效。ThemeManager 因 shared UID 與重複 permission 無法安全改走 `/data/app`，仍由 systemless overlay 提供，因此 MYRON 需要 CorePatch。
 
 官方 `MiuiThemeManagerCnOverlay.apk` 由 Package Manager 安裝，再交給 OverlayManager 啟用；不嘗試新增 `/product/overlay` 掛載。
 
@@ -74,6 +74,7 @@ MYRON `OS3.0.308.0.WPMCNXM` 實機比對：
 | MediaEditor | `2.3.0.8.3` | `2.4.0.4.3-global` | 降版 |
 | SoundRecorder | `7.8.9.3-bc34f3e22` | `7.8.9.9-643c0d7ef` | 降版 |
 | ThemeManager | `10.8.0.0` | `10.8.7.6` | 降版 |
+| AiAsstVision | `5.12.4.20` | `5.12.6.60` | 降版 |
 
 安裝器會清掉 Package Manager cache，但不會主動刪除這四個 App 的 user data。若降版後某個 App 因舊資料庫閃退，再只清該 App 的資料，不需要一次清四個。
 
@@ -182,7 +183,10 @@ com.miui.contentextension
 com.xiaomi.payment
 com.miui.voiceassist
 com.unionpay.tsmservice.mi
+com.miui.home
 ```
+
+`com.miui.home` 被 umount 時，Launcher 會改從 mount 底下的 ROM 原版 APK 讀資源；被蓋掉的 App 只要字串表跟國行版錯開，桌面名稱就會顯示成別的字串（實測 SoundRecorder 國行 7.8.9.3 與國際版 7.8.9.9 的 label id 恰好差一個）。
 
 ## 建置
 
@@ -192,7 +196,7 @@ com.unionpay.tsmservice.mi
 ./build.sh
 ```
 
-輸出位於 `dist/`。建置腳本會檢查十一個 systemless payload、五個正常安裝 payload、arm64 Zygisk binary 與排除清單；只要出現小米錢包、舊三 App systemless 路徑或 `post-fs-data.sh`，建置就會中止。
+輸出位於 `dist/`。建置腳本會檢查十三個 systemless payload、三個正常安裝 payload、一個 priv-app 授權 XML、arm64 Zygisk binary 與排除清單；只要出現小米錢包、舊 Gallery systemless 路徑或 `post-fs-data.sh`，建置就會中止。
 
 重新編譯 Zygisk hook：
 

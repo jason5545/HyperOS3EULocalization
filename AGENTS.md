@@ -6,6 +6,8 @@ Magisk/KernelSU module: HyperOS 3 EU localization — XiaoAI voice stack, Taplus
 ## Layout
 
 - `system/product/…` — systemless payload APKs (checked by `build.sh`)
+- `system/product/etc/permissions/` — priv-app grant XMLs (defensive; the
+  xiaomi.eu 308 base already ships these grants)
 - `payload/` — data-app APKs installed by the on-device service script
 - `zygisk-src/` — Zygisk module (`main.cpp` = Taplus INTL flip + sensitive-process
   policy, `dualwake.cpp` = dual wake, `art_resolver.cpp` = ART symbol resolver)
@@ -52,3 +54,15 @@ decision logic.
 KernelSU (ksud): `ksud module install <zip>` stages into
 `/data/adb/modules_update/`; the module activates on reboot only. Never reboot
 the user's device without explicit approval.
+
+- Keep "umount modules" OFF for `com.miui.home` in KernelSU Next. With umount
+  on, the launcher process reads shadowed APKs from the EU stock files beneath
+  the mounts and misresolves labels whenever CN/EU string tables are misaligned
+  (seen on SoundRecorder: CN 7.8.9.3 label id 0x7f120048 = EU's
+  `another_recording_toast`). ThemeManager only survives because both builds
+  share label id 0x7f120126 — alignment luck, not a mechanism.
+- Data-app payloads are immune to the split (installed under /data/app, visible
+  in every namespace) but only shadow EU stock when CN versionCode ≥ EU's. On
+  the EU 308 base, SoundRecorder (708093 < 708099) and MediaEditor
+  (203990083 < 204990043) can never win as data apps — both ship systemless
+  since v1.0.11/v1.0.12.

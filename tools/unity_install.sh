@@ -60,20 +60,25 @@ system/product/app/VoiceTrigger
 system/product/app/AiAsstVision
 system/product/app/MIUIAiasstService
 system/product/priv-app/MIUIContentExtension
+system/product/priv-app/SoundRecorder
 system/product/app/MINextpay
 system/product/app/MITSMClient
 system/product/app/UPTsmService
 system/product/app/PaymentService
 system/product/app/ThemeManager
+system/product/app/MiMediaEditor
 system/product/overlay/VoiceAssistAndroidOverlay
 "
 
 DATA_APP_PAYLOADS="
 payload/cn-media/MiuiGallery.apk
-payload/cn-media/MiMediaEditor.apk
-payload/cn-media/SoundRecorder.apk
 payload/cn-media/MiuiThemeManagerCnOverlay.apk
 payload/xiaoai/MIUIXiaoAiSpeechEngine.apk
+"
+
+# 單檔 systemless payload：priv-app 授權 XML（補 CN 有、EU 缺的 grants）
+FILE_PAYLOADS="
+system/product/etc/permissions/privapp-permissions-hyperos3eu.xml
 "
 
 log_item "檢查固定 payload"
@@ -84,7 +89,7 @@ for payload in $REQUIRED_PAYLOADS; do
     fi
 done
 
-for payload in $DATA_APP_PAYLOADS; do
+for payload in $DATA_APP_PAYLOADS $FILE_PAYLOADS; do
     if [ ! -f "$MODPATH/$payload" ]; then
         log_warn "缺少 $payload"
         fail_install
@@ -98,12 +103,11 @@ rm -rf "$MODPATH/system/product/app/MipayWallet"
 # 使用的 /system/app 位置，避免同包名兩份 APK 並存。
 rm -rf "$MODPATH/system/app/ThemeManager"
 
-# 舊測試版曾把三個 App 直接放進 systemless tree 並以 post-fs-data bind。
+# 舊測試版曾把 Gallery 直接放進 systemless tree 並以 post-fs-data bind。
 # 更新時必須移除，避免支付 App 看見額外 mount，也避免 hybrid_mount 空 root 報錯。
+# （SoundRecorder、MediaEditor 分別自 v1.0.11、v1.0.12 起恢復 systemless，不再列於此處。）
 rm -rf \
     "$MODPATH/system/product/priv-app/MiuiGallery" \
-    "$MODPATH/system/product/app/MiMediaEditor" \
-    "$MODPATH/system/product/priv-app/SoundRecorder" \
     "$MODPATH/system/product/data-app"
 rm -f \
     "$MODPATH/system/product/overlay/MiuiThemeManagerCnOverlay.apk" \
@@ -136,6 +140,8 @@ touch "$MODPATH/system/etc/localization/SystemVersion/$SYSTEM_VERSION"
 
 # Mi Pay 的安全元件類型與小愛服務開關。
 # 地區與 mod_device 完全沿用 ROM，不強迫切到 CN。
+# 註：CN 308 由 odm 提供 ro.vendor.se.type=eSE,HCE,UICC（EU 底包同值，已實測在機）；
+# 這裡保留舊名 ro.se.type 給仍讀它的 MIUI 程式碼。
 cat > "$MODPATH/system.prop" <<EOF
 ro.se.type=eSE,HCE,UICC
 ro.vendor.audio.aiasst.support=true
@@ -148,6 +154,6 @@ if ! pm path org.lsposed.corepatch >/dev/null 2>&1; then
     log_warn "未偵測到 CorePatch；ThemeManager 的 shared UID／簽章相容可能失敗。"
 fi
 
-log_item "已安裝：小愛、語音喚醒、AI 通話、傳送門、智慧卡支付鏈路"
-log_item "已準備：小米語音引擎、國行相簿、編輯器、錄音機正常安裝 payload 與 ThemeManager systemless payload"
-log_item "已加入：AI 通話官方入口與 cloud-control、Taplus、Theme API region、Wallet/GMS 安全排除與 App 語系設定"
+log_item "已安裝：小愛、語音喚醒、AI 通話、傳送門、智慧卡支付鏈路、錄音機與編輯器（systemless）"
+log_item "已準備：小米語音引擎、國行相簿正常安裝 payload 與 ThemeManager systemless payload"
+log_item "已加入：AI 通話官方入口與 cloud-control、Taplus、Theme API region、Wallet/GMS 安全排除、priv-app 授權補齊與 App 語系設定"

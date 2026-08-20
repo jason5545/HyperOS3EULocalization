@@ -20,9 +20,13 @@ while [ "$(getprop sys.boot_completed)" != "1" ] && [ "$BOOT_WAIT" -lt 120 ]; do
     BOOT_WAIT=$((BOOT_WAIT + 1))
 done
 
-# 語音引擎、Gallery、MediaEditor、SoundRecorder 走正常 /data/app 安裝，讓 Android
+# 語音引擎、Gallery 走正常 /data/app 安裝，讓 Android
 # 自己解出 native libraries；不要建立額外 bind mount，避免支付 App 看見
 # KernelSU 模組掛載。ThemeManager 因 shared UID/重複 permission 保留 systemless。
+# SoundRecorder 自 v1.0.11 改為 systemless priv-app：搭配模組自帶的
+# privapp 授權 XML 才有 WRITE_MEDIA_STORAGE／CAPTURE_AUDIO_OUTPUT。
+# MediaEditor 自 v1.0.12 改為 systemless：EU 308 底包內建 2.4.0.4.3-global
+# （vc 204990043）高於 CN 版（203990083），data-app 會被當過期更新丟棄。
 DATA_PAYLOAD_DIR="$MODDIR/payload"
 DATA_INSTALL_TMP=/data/local/tmp/jrc_data_app_install
 DATA_INSTALL_LOG="$MODDIR/data_app_install.log"
@@ -62,8 +66,19 @@ ensure_data_app() {
 echo "=== data app ensure: $(date) ===" > "$DATA_INSTALL_LOG"
 ensure_data_app com.xiaomi.mibrain.speech xiaoai/MIUIXiaoAiSpeechEngine.apk 60
 ensure_data_app com.miui.gallery cn-media/MiuiGallery.apk 5000507
-ensure_data_app com.miui.mediaeditor cn-media/MiMediaEditor.apk 203990083
-ensure_data_app com.android.soundrecorder cn-media/SoundRecorder.apk 708093
+
+# 曾走 /data/app 的套件（SoundRecorder、MediaEditor）在同 versionCode 下會被
+# data 安裝遮蔽，這裡卸掉殘留的 data 安裝，讓 systemless 版本生效。
+# 錄音檔與相片都在 MediaStore，卸掉 data 安裝不影響既有檔案。
+for MIGRATE_PKG in com.android.soundrecorder com.miui.mediaeditor; do
+    case "$(pm path "$MIGRATE_PKG" 2>/dev/null | head -n 1)" in
+        package:/data/app/*)
+            if pm uninstall "$MIGRATE_PKG" >> "$DATA_INSTALL_LOG" 2>&1; then
+                echo "MIGRATED: $MIGRATE_PKG data -> module" >> "$DATA_INSTALL_LOG"
+            fi
+            ;;
+    esac
+done
 
 # 官方 308 static overlay 在 hybrid_mount 環境可能無法新增到 /product/overlay；
 # 改由 Package Manager 安裝並讓 OverlayManager 啟用。

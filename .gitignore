@@ -55,3 +55,6 @@ debug_runtime.sh
 # OS generated
 .DS_Store
 Thumbs.db
+
+# host mock test binary (built by zygisk-src/test/run_test.sh)
+zygisk-src/test/test_runner
