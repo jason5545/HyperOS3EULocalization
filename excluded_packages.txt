@@ -10,6 +10,9 @@ com.miui.weather2
 com.android.calendar
 com.miui.packageinstaller
 com.miui.securitycenter
+# NetworkAssistantProvider 跑在點號命名的獨立進程；控制中心「行動數據」磁貼的
+# 當月流量由它提供，遭 flip 時 getBrand() 走 CN 路徑導致磁貼只顯示「已開啟」
+com.miui.securitycenter.remote
 com.android.phone
 com.android.systemui
 com.xiaomi.aiasst.service

@@ -229,9 +229,13 @@ private:
 
     static bool matchesPackageProcess(const char *nice_name,
                                       const char *package_name) {
+        // 子進程有兩種命名："pkg:remote"（冒號）與 "pkg.remote"（完整點號名，
+        // 如 SecurityCenter 的 com.miui.securitycenter.remote，NetworkAssistant
+        // provider 所在）。兩者都算同一 package，否則點號子進程會漏出排除清單。
         const size_t length = strlen(package_name);
         return strncmp(nice_name, package_name, length) == 0 &&
-               (nice_name[length] == '\0' || nice_name[length] == ':');
+               (nice_name[length] == '\0' || nice_name[length] == ':' ||
+                nice_name[length] == '.');
     }
 
     static bool isSensitiveProcess(const char *nice_name) {
