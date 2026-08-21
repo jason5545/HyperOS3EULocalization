@@ -102,21 +102,50 @@ set_app_locale() {
     cmd locale set-app-locales "$PACKAGE_NAME" --user 0 --locales "$APP_LOCALE" >/dev/null 2>&1
 }
 
-set_app_locale com.miui.voiceassist zh-CN,zh-TW zh-CN
-set_app_locale com.miui.voicetrigger zh-CN,zh-TW zh-CN
-set_app_locale com.xiaomi.mibrain.speech zh-CN,zh-TW zh-CN
-set_app_locale com.xiaomi.aiasst.vision zh-CN,zh-TW zh-CN
-set_app_locale com.xiaomi.aiasst.service zh-CN,zh-TW zh-CN
+app_locale_is() {
+    [ "$(cmd locale get-app-locales "$1" --user 0 2>/dev/null \
+        | sed -n 's/.*are \[\(.*\)\]/\1/p')" = "$2" ]
+}
 
-set_app_locale com.miui.contentextension zh-TW,zh-CN zh-TW
-set_app_locale com.miui.nextpay zh-TW,zh-CN zh-TW
-set_app_locale com.miui.tsmclient zh-TW,zh-CN zh-TW
-set_app_locale com.unionpay.tsmservice.mi zh-TW,zh-CN zh-TW
-set_app_locale com.xiaomi.payment zh-TW,zh-CN zh-TW
-set_app_locale com.miui.gallery zh-TW,zh-CN zh-TW
-set_app_locale com.miui.mediaeditor zh-TW,zh-CN zh-TW
-set_app_locale com.android.soundrecorder zh-TW,zh-CN zh-TW
-set_app_locale com.android.thememanager zh-TW,zh-CN zh-TW
+ensure_app_locale() {
+    app_locale_is "$1" "$3" && return
+    LOCALE_FAILED=1
+    set_app_locale "$1" "$2" "$3"
+}
+
+# /data/system_ce 要解鎖後才掛載，boot_completed 可能早於解鎖：直接寫會吃
+# LocaleManagerService IOException，該次開機的語系設定整個沒生效
+# （2026-08-21 07:46 實測，開機後 30 秒內前兩個 App 寫入失敗）。
+# 先等 ce ready（有上限，超時仍往下走、靠驗證重試收尾），
+# 再逐個「驗證不符才寫入」，失敗的下一輪重試。
+LOCALE_CE_WAIT=0
+while [ ! -d /data/system_ce/0 ] && [ "$LOCALE_CE_WAIT" -lt 30 ]; do
+    sleep 2
+    LOCALE_CE_WAIT=$((LOCALE_CE_WAIT + 1))
+done
+
+LOCALE_ROUND=0
+while [ "$LOCALE_ROUND" -lt 3 ]; do
+    LOCALE_FAILED=0
+    ensure_app_locale com.miui.voiceassist zh-CN,zh-TW zh-CN
+    ensure_app_locale com.miui.voicetrigger zh-CN,zh-TW zh-CN
+    ensure_app_locale com.xiaomi.mibrain.speech zh-CN,zh-TW zh-CN
+    ensure_app_locale com.xiaomi.aiasst.vision zh-CN,zh-TW zh-CN
+    ensure_app_locale com.xiaomi.aiasst.service zh-CN,zh-TW zh-CN
+
+    ensure_app_locale com.miui.contentextension zh-TW,zh-CN zh-TW
+    ensure_app_locale com.miui.nextpay zh-TW,zh-CN zh-TW
+    ensure_app_locale com.miui.tsmclient zh-TW,zh-CN zh-TW
+    ensure_app_locale com.unionpay.tsmservice.mi zh-TW,zh-CN zh-TW
+    ensure_app_locale com.xiaomi.payment zh-TW,zh-CN zh-TW
+    ensure_app_locale com.miui.gallery zh-TW,zh-CN zh-TW
+    ensure_app_locale com.miui.mediaeditor zh-TW,zh-CN zh-TW
+    ensure_app_locale com.android.soundrecorder zh-TW,zh-CN zh-TW
+    ensure_app_locale com.android.thememanager zh-TW,zh-CN zh-TW
+    [ "$LOCALE_FAILED" = "0" ] && break
+    LOCALE_ROUND=$((LOCALE_ROUND + 1))
+    sleep 5
+done
 
 # --- 雙喚醒冷開機保底 -------------------------------------------------------
 # 1) 冷開機記憶體高峰時，MIUI 可能在 BootupReceiver 結束後數十毫秒內回收
