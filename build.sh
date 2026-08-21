@@ -36,8 +36,10 @@ payload/xiaoai/MIUIXiaoAiSpeechEngine.apk
 "
 
 # 單檔 systemless payload：priv-app 授權 XML（補 CN 有、EU 缺的 grants）
+# 與雙喚醒冷開機保底 worker（service.sh 開機時複製到 /data/local/tmp 執行）
 FILE_PAYLOADS="
 system/product/etc/permissions/privapp-permissions-hyperos3eu.xml
+dualwake_boot.sh
 "
 
 EXCLUDED_PATHS="

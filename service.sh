@@ -119,11 +119,13 @@ set_app_locale com.android.soundrecorder zh-TW,zh-CN zh-TW
 set_app_locale com.android.thememanager zh-TW,zh-CN zh-TW
 
 # --- 雙喚醒冷開機保底 -------------------------------------------------------
-# 冷開機記憶體高峰時，MIUI 可能在 BootupReceiver 結束後數十毫秒內回收
-# com.miui.voiceassist:voice_trigger，讓 CoreAlive 內部的 bind 來不及執行。
-# 等系統穩定後檢查 VoiceTriggerService 是否已由小愛自己綁定；沒有才對
-# 小愛自己的 BootupReceiver 重送開機廣播（不直接啟動 VoiceTrigger 服務，
-# 不切預設助理；綁定仍由 308 官方 CoreAlive 鏈完成，caller 是小愛）。
+# 1) 冷開機記憶體高峰時，MIUI 可能在 BootupReceiver 結束後數十毫秒內回收
+#    com.miui.voiceassist:voice_trigger，讓 CoreAlive 內部的 bind 來不及執行。
+# 2) 2026-08-21 實測定因：開機風暴裡 GSA 的 AoHD 鏈可能卡死不載入模型
+#    （實測卡 13 分鐘）；killall audioserver 只會把事件送達鏈打斷（DSP 有
+#    偵測、助理不起來），絕對不可 bounce。解法是小愛武裝後盯 GSA 模型，
+#    逾寬限未載入就殺 GSA 的 isolated hotword process 讓系統自動重建整條
+#    鏈（細節見 dualwake_boot.sh 與 AGENTS.md「Dual-wake boot race」）。
 DUALWAKE_LOG="$MODDIR/dualwake_boot.log"
 if [ "$(settings get global voice_trigger_enabled)" = "1" ]; then
     case "$(settings get secure voice_interaction_service)" in
@@ -131,26 +133,13 @@ if [ "$(settings get global voice_trigger_enabled)" = "1" ]; then
         : # 小愛已是預設助理：官方 VoiceInteractionService 鏈自己會處理
         ;;
     *)
-        # 改成獨立背景 worker，service.sh 本體立刻結束：避免開機後數分鐘
+        # 獨立背景 worker，service.sh 本體立刻結束：避免開機後數分鐘
         # （支付 App 首次啟動的敏感窗口）系統裡常駐一個 cmdline 帶
-        # /data/adb/modules 路徑的 root shell。重試邏輯與原本完全相同，
-        # 記錄檔路徑走環境變數，不出現在 worker 的 cmdline。
-        DUALWAKE_LOG="$DUALWAKE_LOG" nohup sh -c '
-            RETRY=0
-            while [ "$RETRY" -lt 3 ]; do
-                sleep 60
-                if dumpsys activity services com.miui.voicetrigger 2>/dev/null \
-                        | grep -q "VoiceTriggerService"; then
-                    break
-                fi
-                RETRY=$((RETRY + 1))
-                echo "retry $RETRY: re-deliver BootupReceiver $(date)" \
-                    >> "$DUALWAKE_LOG"
-                am broadcast -a android.intent.action.BOOT_COMPLETED \
-                    -n com.miui.voiceassist/com.xiaomi.voiceassistant.voiceTrigger.adapter.BootupReceiver \
-                    >> "$DUALWAKE_LOG" 2>&1
-            done
-        ' >/dev/null 2>&1 &
+        # /data/adb/modules 路徑的 root shell。worker 複製到 /data/local/tmp
+        # 執行，記錄檔路徑走環境變數，不出現在 cmdline。
+        WORKER_TMP=/data/local/tmp/jrc_dualwake_boot.sh
+        cp "$MODDIR/dualwake_boot.sh" "$WORKER_TMP"
+        DUALWAKE_LOG="$DUALWAKE_LOG" nohup sh "$WORKER_TMP" >/dev/null 2>&1 &
         ;;
     esac
 fi

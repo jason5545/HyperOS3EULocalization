@@ -13,6 +13,9 @@ Magisk/KernelSU module: HyperOS 3 EU localization — XiaoAI voice stack, Taplus
   policy, `dualwake.cpp` = dual wake, `art_resolver.cpp` = ART symbol resolver)
 - `zygisk-src/test/` — host-side mock test (no device needed)
 - `scripts/build_zygisk.sh` — native build (needs `NDK_BUILD=/path/to/ndk-build`)
+- `dualwake_boot.sh` — dual-wake cold-boot watchdog, copied by `service.sh` to
+  `/data/local/tmp` and run in the background (see "Dual-wake boot race" below)
+- `scripts/test_dualwake_boot.sh` — host-side shell test for the watchdog
 - `build.sh` — packs `dist/HyperOS3_EU_XiaoAI_Portal_MiPay_<version>.zip`
 - `customize.sh`, `tools/unity_install.sh` — install-time logic on device
 
@@ -22,6 +25,7 @@ Magisk/KernelSU module: HyperOS 3 EU localization — XiaoAI voice stack, Taplus
 
 ```sh
 sh zygisk-src/test/run_test.sh                                 # regression gate
+sh scripts/test_dualwake_boot.sh                               # boot watchdog gate
 NDK_BUILD="$HOME/Library/Android/sdk/ndk/<ver>/ndk-build" \
     sh scripts/build_zygisk.sh                                 # native .so
 sh build.sh                                                    # release zip
@@ -48,6 +52,57 @@ sources changed, rebuild the .so first, then test, then pack.
 
 The mock test covers all of the above — extend it when changing `main.cpp`
 decision logic.
+
+## Dual-wake boot race (root cause, revised 2026-08-21 on myron)
+
+The 2026-08-20 "Qualcomm HAL load-order" theory is **retired** — disproven by
+a clean same-boot A/B: after an orderly AoHD rebuild GSA's model loaded
+*first* (334ms ahead of XiaoAI) and both sides worked, while an identical
+GSA-first order after a disorderly `killall audioserver` left Google dead
+for 7+ hours. Load order was a red herring; the real variable is whether
+GSA's AlwaysOnHotwordDetector chain (system_server `SoundTriggerHelper` ↔
+isolated hotword process
+`googlequicksearchbox:trusted_disable_art_image_…:…gsa.hotword…` ↔
+second-stage audio verification) was rebuilt **cleanly and completely**.
+
+Two confirmed failure modes:
+
+- **Boot wedge**: GSA's first AoHD init can stall in the boot storm
+  (measured: ATTACH 21:36:10, no model for 13 minutes, then self-rebuild
+  at 21:49:02 and loaded within 100ms). While stalled, Hey Google is dead.
+- **Stale chain after audioserver kill/crash**: a disorderly HAL teardown
+  rebuilds only the middleware sessions; the GSA-side chain survives in a
+  half-old state — DSP keeps detecting (middleware logs `RECOGNITION`
+  status 0) but events never reach GSA, so the assistant never launches.
+  XiaoAI's native `com.miui.voicetrigger` path rebuilds cleanly on its
+  own, which is why "小愛 works, Google dead" is the dominant symptom.
+  **Never `killall audioserver`** — that is what broke it (self-inflicted
+  on 2026-08-20 22:27, broke Google for the rest of that boot).
+
+Fix (what Settings → 預設系統應用程式 → 小幫手與語音助理 toggling does
+manually): kill GSA's isolated hotword process; system_server's
+HotwordDetectionConnection rebinds within ~5-10s — old session
+STOP/UNLOAD/DETACH, fresh attach, fresh model load (new uuid; vendorUuid
+stays `7038ddc8-30f2-…`), recognition active. XiaoAI's session is
+untouched (live-verified 2026-08-21 07:18). Killing an app process has no
+audio impact, so no call-state deferral is needed.
+
+`dualwake_boot.sh` polls every 15s after `boot_completed` (12 rounds max):
+re-delivers XiaoAI's BootupReceiver until armed (its model is in
+`/data/user/0`, needs unlock), then watches for GSA's model (matched by
+`text: X Google` or vendorUuid `7038ddc8-30f2`; only the trailing
+active-model listing carries `text:`, detached session logs don't). If GSA
+hasn't loaded within `DUALWAKE_GSA_GRACE` (4) rounds, kill the isolated
+hotword process — at most `DUALWAKE_GSA_MAX_FIXES` (2) times. If no such
+process exists (Voice Match off / not bound yet), just keep watching.
+
+`service.sh` gates this on `voice_trigger_enabled=1` and XiaoAI not being
+the default assistant.
+
+Residual known risk: an audioserver crash *after* the worker's boot window
+can still stale the chain silently; there is no cheap external detector
+(middleware shows ACTIVE throughout) — recovery is the same kill, done
+manually.
 
 ## Deploy
 
