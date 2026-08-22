@@ -45,8 +45,10 @@ struct JavaVM_;
 struct MockJniKnobs {
     bool find_class_ok = false;     // FindClass / GetStaticFieldID succeed
     bool static_bool_value = false; // GetStaticBooleanField result
+    bool theme_worker_ok = false;   // themeRegionWorker: attach + all lookups resolve
     int set_static_bool_calls = 0;
     jboolean last_set_static_bool = 0;
+    int set_static_object_calls = 0; // region flips (SetStaticObjectField)
     int attach_calls = 0;
     int detach_calls = 0;
 };
@@ -61,8 +63,14 @@ struct JNIEnv_ {
     void ReleaseStringUTFChars(jstring, const char *) {}
     bool ExceptionCheck() { return false; }
     void ExceptionClear() {}
-    jstring NewStringUTF(const char *) { return nullptr; }
-    jobject CallObjectMethod(jobject, jmethodID, ...) { return nullptr; }
+    jstring NewStringUTF(const char *) {
+        static _jstring str;
+        return g_jni.theme_worker_ok ? &str : nullptr;
+    }
+    jobject CallObjectMethod(jobject, jmethodID, ...) {
+        static _jobject obj;
+        return g_jni.theme_worker_ok ? &obj : nullptr;
+    }
     void DeleteLocalRef(jobject) {}
     jclass FindClass(const char *) {
         static _jclass cls;
@@ -79,19 +87,35 @@ struct JNIEnv_ {
         g_jni.set_static_bool_calls++;
         g_jni.last_set_static_bool = v;
     }
-    void SetStaticObjectField(jclass, jfieldID, jobject) {}
-    jmethodID GetStaticMethodID(jclass, const char *, const char *) { return nullptr; }
-    jobject CallStaticObjectMethod(jclass, jmethodID, ...) { return nullptr; }
-    jclass GetObjectClass(jobject) { return nullptr; }
-    jmethodID GetMethodID(jclass, const char *, const char *) { return nullptr; }
+    void SetStaticObjectField(jclass, jfieldID, jobject) {
+        g_jni.set_static_object_calls++;
+    }
+    jmethodID GetStaticMethodID(jclass, const char *, const char *) {
+        static _jmethodID mid;
+        return g_jni.theme_worker_ok ? &mid : nullptr;
+    }
+    jobject CallStaticObjectMethod(jclass, jmethodID, ...) {
+        static _jobject obj;
+        return g_jni.theme_worker_ok ? &obj : nullptr;
+    }
+    jclass GetObjectClass(jobject) {
+        static _jclass cls;
+        return g_jni.theme_worker_ok ? &cls : nullptr;
+    }
+    jmethodID GetMethodID(jclass, const char *, const char *) {
+        static _jmethodID mid;
+        return g_jni.theme_worker_ok ? &mid : nullptr;
+    }
 };
 
 struct JavaVM_ {
-    // Return JNI_OK but a null env: the module's worker treats that as failure
-    // and exits immediately, which keeps threads out of the test process.
+    // Default: return JNI_OK but a null env — the module's worker treats that
+    // as failure and exits immediately, keeping threads out of the test
+    // process. theme_worker_ok hands out a usable env so the worker runs.
     int AttachCurrentThread(JNIEnv_ **env, void *) {
         g_jni.attach_calls++;
-        *env = nullptr;
+        static JNIEnv_ worker_env;
+        *env = g_jni.theme_worker_ok ? &worker_env : nullptr;
         return JNI_OK;
     }
     int DetachCurrentThread() {

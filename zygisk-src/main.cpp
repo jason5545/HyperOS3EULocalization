@@ -5,9 +5,11 @@
 // 讓 miui.contentcatcher.InterceptorProxy.create(Activity) 不再提早 return null，
 // 使 Taplus（傳送門）長按取詞在未排除的 app 生效。
 //
-// ThemeManager 進程則等 Application 建立完成，再把 App 內的 API region
-// cache 設為 CN。這不修改全域 ro.miui.region，也不會在 Android 建立
-// Application 資源時提早切區，避免 my_backup_rules / network config XML 錯配。
+// ThemeManager 進程則在 Application 物件一出現時（onCreate 完成前），就把
+// App 內的 API region lazy cache（DeviceUtils.ld6）設為 CN —— 該欄位
+// write-once，先寫先贏，必須趕在首個 API 請求把它快取成真實 region 之前。
+// 這不修改全域 ro.miui.region，也不影響 Android 建立 Application 資源時的
+// 區域判斷，避免 my_backup_rules / network config XML 錯配。
 //
 // 安全約束：
 // - 所有 JNI 呼叫檢查例外並 ExceptionClear，絕不讓例外逸出到 app
@@ -120,10 +122,12 @@ static void *themeRegionWorker(void *opaque) {
             continue;
         }
 
-        // mInitialApplication is assigned immediately before Application.onCreate.
-        // Give onCreate a short head start; overwriting the App caches afterwards is
-        // safe even if an initial request already cached TW.
-        usleep(250000);
+        // mInitialApplication 在 Application.onCreate 之前就被賦值，此時連
+        // 首個 Activity 都還沒建立。立刻翻轉，不給 head start：
+        // DeviceUtils.ld6 是 write-once lazy cache（i() 只在欄位為 null 時
+        // 才填入 miui.os.Build.getRegion()，ParamInterceptor 每個 API 請求
+        // 都讀它），先寫者贏。冷啟動首頁空白的根因正是舊版在此睡了 250ms，
+        // 讓首頁請求搶先把真實 region 快取進去。
 
         jclass application_class = env->GetObjectClass(application);
         jmethodID get_class_loader = application_class

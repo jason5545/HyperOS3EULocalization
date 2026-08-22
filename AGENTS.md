@@ -49,6 +49,15 @@ sources changed, rebuild the .so first, then test, then pack.
   not override this.
 - Package matching treats `pkg:child` and `pkg.child` as the same package;
   bare prefixes (`com.google.android.gmsx`) must not match.
+- ThemeManager region flip must land before the app's first API request:
+  `basemodule.utils.DeviceUtils.ld6` (10.8.7.6+; class was `…utils.ld6` before)
+  is a **write-once lazy cache** — `DeviceUtils.i()` fills it from
+  `miui.os.Build.getRegion()` only while null, and OkHttp `ParamInterceptor`
+  reads it into every request's `region=` param. First writer wins, so the
+  worker flips it the moment `ActivityThread.currentApplication()` appears
+  (before `Application.onCreate` finishes) — never add a head-start sleep
+  (the 250ms one made every cold-start home feed go out with the real region
+  and render empty until pull-to-refresh).
 
 The mock test covers all of the above — extend it when changing `main.cpp`
 decision logic.

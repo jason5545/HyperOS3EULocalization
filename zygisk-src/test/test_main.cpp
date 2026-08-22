@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <string>
 #include <vector>
 #include <dlfcn.h>
@@ -61,6 +62,17 @@ static int g_voice_trigger_starts = 0;
 static int g_lsplant_preloads = 0;
 
 MockJniKnobs g_jni;
+
+// Region-flip timing sentinel: count every usleep the worker takes before the
+// flip lands. The ThemeManager region cache is a write-once lazy field, so the
+// worker must flip the moment the Application appears — any head-start sleep
+// before SetStaticObjectField reopens the cold-start empty-feed race.
+static unsigned long g_usleep_before_flip = 0;
+
+extern "C" int usleep(useconds_t us) {
+    if (g_jni.set_static_object_calls == 0) g_usleep_before_flip += us;
+    return 0;  // don't really sleep: keep the suite fast
+}
 
 // ---- the module under test ---------------------------------------------------
 
@@ -181,6 +193,7 @@ static void testNonSensitiveNoDebug() {
     CHECK(g_accessed_paths.size() == 1);              // debug flag probed once
     CHECK(g_accessed_paths[0].find("/debug") != std::string::npos);
     CHECK(g_logs.empty());                            // flag absent -> silent
+    CHECK(g_jni.attach_calls == 0);                   // no theme worker for other apps
 }
 
 static void testNonSensitiveDebugFlip() {
@@ -243,6 +256,29 @@ static void testVoiceTrigger() {
     CHECK(g_voice_trigger_starts == 1); // worker started in postAppSpecialize
 }
 
+static void testThemeRegionFlipIsImmediate() {
+    g_case = "theme region flip lands without head-start sleep";
+    resetState();
+    g_usleep_before_flip = 0;
+    g_jni.find_class_ok = true;   // ActivityThread / ClassLoader / DeviceUtils resolve
+    g_jni.theme_worker_ok = true; // attach succeeds, Application + classloader ready
+    specialize("com.android.thememanager");
+
+    // The worker runs on its own detached thread (mock usleep is instant, so
+    // a healthy run finishes almost immediately). Wait for the flip.
+    for (int i = 0; i < 400 && g_jni.set_static_object_calls == 0; ++i) {
+        const struct timespec ts = {0, 5 * 1000 * 1000};  // 5ms
+        nanosleep(&ts, nullptr);
+    }
+    for (int i = 0; i < 400 && g_jni.detach_calls == 0; ++i) {
+        const struct timespec ts = {0, 5 * 1000 * 1000};
+        nanosleep(&ts, nullptr);
+    }
+    CHECK(g_jni.set_static_object_calls == 1);  // flipped on the first attempt
+    CHECK(g_usleep_before_flip == 0);           // no head start once app appears
+    CHECK(g_jni.attach_calls == 1 && g_jni.detach_calls == 1);
+}
+
 int main() {
     loadModule();
     if (!g_abi) {
@@ -261,6 +297,7 @@ int main() {
     testExclusions();
     testVoiceTrigger();
     testNonSensitiveDebugFlip();
+    testThemeRegionFlipIsImmediate();
 
     if (g_failures == 0) {
         printf("ALL TESTS PASSED\n");
