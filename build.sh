@@ -26,6 +26,7 @@ system/product/app/UPTsmService
 system/product/app/PaymentService
 system/product/app/ThemeManager
 system/product/app/MiMediaEditor
+system/product/priv-app/MiuiHome
 system/product/overlay/VoiceAssistAndroidOverlay
 "
 

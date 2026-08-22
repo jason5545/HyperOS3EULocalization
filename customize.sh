@@ -8,6 +8,7 @@ ASH_STANDALONE=1
 ui_print ""
 ui_print "[HyperOS 3 EU 小愛・語音喚醒・傳送門・Mi Pay]"
 ui_print "- 固定安裝小愛、語音喚醒、AI 通話、傳送門、智慧卡與必要支付服務"
+ui_print "- 國行系統桌面走 systemless，zygisk 保留 Google 負一屏資料來源"
 ui_print "- 相簿走正常 App 安裝；編輯器、錄音機（priv-app）、主題商店走 systemless"
 ui_print "- 不安裝小米錢包 App；銀行卡與部分儲值入口不可用"
 ui_print "- 內建 Taplus 國際版 Zygisk 修復，不安裝 Focus overlay"

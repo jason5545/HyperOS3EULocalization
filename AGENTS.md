@@ -10,7 +10,8 @@ Magisk/KernelSU module: HyperOS 3 EU localization — XiaoAI voice stack, Taplus
   xiaomi.eu 308 base already ships these grants)
 - `payload/` — data-app APKs installed by the on-device service script
 - `zygisk-src/` — Zygisk module (`main.cpp` = Taplus INTL flip + sensitive-process
-  policy, `dualwake.cpp` = dual wake, `art_resolver.cpp` = ART symbol resolver)
+  policy, `dualwake.cpp` = dual wake, `homefeed.cpp` = MiuiHome CN Google-feed
+  prop hook, `art_resolver.cpp` = ART symbol resolver)
 - `zygisk-src/test/` — host-side mock test (no device needed)
 - `scripts/build_zygisk.sh` — native build (needs `NDK_BUILD=/path/to/ndk-build`)
 - `dualwake_boot.sh` — dual-wake cold-boot watchdog, copied by `service.sh` to
@@ -47,6 +48,53 @@ sources changed, rebuild the .so first, then test, then pack.
 - `com.miui.voiceassist:voice_trigger` / `com.miui.voicetrigger*` must never be
   dlclosed — the dual-wake workers live in the module. The exclusion list must
   not override this.
+- `com.miui.home` must never be dlclosed **nor flipped** — the homefeed worker
+  lives in the module, and the CN launcher's Google minus-screen branch
+  (`LauncherAssistantCompat.newInstance`) requires
+  `miui.os.Build.IS_INTERNATIONAL_BUILD == true`. Both hold regardless of the
+  exclusion list (hardcoded in `main.cpp`).
+- The CN MiuiHome payload (`system/product/priv-app/MiuiHome`,
+  RELEASE-7.50.06.2529 / vc 750062529) gets its Google feed option from the
+  homefeed hook, not from props: CN `DeviceConfig.isUseGoogleMinusScreen()`
+  gates on `ro.com.miui.rsa` / `ro.com.miui.rsa.search` carrier allowlists and
+  a `{mx_telcel, lm_cr}` region list — all empty on EU. The worker lsplant-hooks
+  `android.os.SystemProperties.get(String)` inside the launcher process only
+  (reached via the launcher's own reflective
+  `com.miui.launcher.utils.SystemProperties` wrapper, so AOT inlining can't
+  bypass it) and answers `tier1_5` for `ro.com.miui.rsa`, which sets
+  `CAN_SWITCH_MINUS_SCREEN=true`; the actual provider still follows
+  `settings system switch_personal_assistant` (`personal_assistant_google` on
+  myron), keeping the switchable 資料來源 list like the EU build. Never
+  `resetprop` the real prop instead — a global `ro.*` change is visible to
+  DroidGuard/Wallet. The Java-side `shouldInstall` pins vc 750062529, so the
+  hook stays inert on any other launcher build.
+- The bundled CN launcherclient lib reads GSA's `service.api.version` via
+  `resolveService(intent, 128)` (EU lib uses 786560 = GET_META_DATA |
+  MATCH_DIRECT_BOOT_*) and caches it in a **write-once static** (`…launcherclient
+  .LauncherClient.b`): if the resolve fails at boot (GSA was Play-updated minutes
+  before; its `cfbv` toggles DrawerOverlayService enabled state by Acetone
+  eligibility), the client is stuck on the legacy attach path and GSA never
+  sends `service_status` — the minus screen swipe stays dead
+  (`mLauncherOverlay:null`) while `isConnected` looks healthy.
+  `HomeRsaHooker.ensureServiceApiVersion` re-resolves with the EU flags and
+  rewrites the static field, retrying ~5 min to outlast the boot race. GSA-side
+  eligibility is device-level (`searchBoxEligible=true`,
+  `googleOverlayActive=true`), not launcher-build-specific — verified via
+  `dumpsys activity service com.google.android.googlequicksearchbox/com.google
+  .android.apps.gsa.nowoverlayservice.DrawerOverlayService` on the working EU
+  session (Server version 10, overlay OPENED).
+- The CN launcher's 資訊助手 (App Vault) mode is rerouted by
+  `MinusScreenHooker`: INTL `newInstance` falls back to binding
+  `com.mi.android.globalminusscreen`, which the EU 308 base doesn't ship —
+  the hook detects that dead end (reads `mPackageName` up the class chain) and
+  substitutes the stock CN pairing
+  `LauncherAssistantCompatMIUI(launcher, com.miui.personalassistant)`; the
+  installed PersonalAssistant (25.31.01) serves `com.miui.launcher
+  .WINDOW_OVERLAY` and the launcher already holds
+  `miui.personalassistant.ACCESS_PROVIDER` (signature|privileged). Google mode
+  and a real globalminusscreen install pass through untouched. Live source
+  switching works because `AssistantLauncherCallbacksWrap.reloadMinusScreen()`
+  re-runs `newInstance`.
 - Package matching treats `pkg:child` and `pkg.child` as the same package;
   bare prefixes (`com.google.android.gmsx`) must not match.
 - ThemeManager region flip must land before the app's first API request:
@@ -119,12 +167,20 @@ KernelSU (ksud): `ksud module install <zip>` stages into
 `/data/adb/modules_update/`; the module activates on reboot only. Never reboot
 the user's device without explicit approval.
 
-- Keep "umount modules" OFF for `com.miui.home` in KernelSU Next. With umount
-  on, the launcher process reads shadowed APKs from the EU stock files beneath
-  the mounts and misresolves labels whenever CN/EU string tables are misaligned
-  (seen on SoundRecorder: CN 7.8.9.3 label id 0x7f120048 = EU's
+- Keep "umount modules" OFF for `com.miui.home` in KernelSU Next. Since v1.0.20
+  the module deliberately mounts the CN launcher over EU stock; with umount on,
+  the launcher process would read the EU stock APK beneath the mounts (the
+  homefeed hook then stays inert — version guard — and the CN launcher silently
+  reverts to EU). The old reason still applies to any partial-shadowing case:
+  a launcher reading mismatched CN/EU string tables misresolves labels (seen on
+  SoundRecorder: CN 7.8.9.3 label id 0x7f120048 = EU's
   `another_recording_toast`). ThemeManager only survives because both builds
   share label id 0x7f120126 — alignment luck, not a mechanism.
+- `excluded_packages.txt` only drives the Zygisk Taplus/region **flip**
+  exclusion (`zygisk-src/main.cpp`); it does NOT exclude systemless mounts.
+  Removing a payload APK from `system/product/…` is the only way to un-shadow
+  an app. (v1.0.19-era experiment: adding com.miui.home there did not restore
+  the EU launcher — the CN APK stayed mounted.)
 - Data-app payloads are immune to the split (installed under /data/app, visible
   in every namespace) but only shadow EU stock when CN versionCode ≥ EU's. On
   the EU 308 base, SoundRecorder (708093 < 708099) can never win as a data app

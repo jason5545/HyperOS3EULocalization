@@ -60,6 +60,8 @@ extern "C" FILE *fopen(const char *path, const char *mode) {
 static int g_core_alive_starts = 0;
 static int g_voice_trigger_starts = 0;
 static int g_lsplant_preloads = 0;
+static int g_homefeed_preloads = 0;
+static int g_homefeed_starts = 0;
 
 MockJniKnobs g_jni;
 
@@ -82,6 +84,10 @@ extern "C" int usleep(useconds_t us) {
 void dualwakePreloadLsplant() { g_lsplant_preloads++; }
 void dualwakeStartCoreAlive(JavaVM *) { g_core_alive_starts++; }
 void dualwakeStartVoiceTrigger(JavaVM *) { g_voice_trigger_starts++; }
+
+// homefeed stubs (signatures from homefeed.h, pulled in by main.cpp)
+void homefeedPreloadLsplant() { g_homefeed_preloads++; }
+void homefeedStartMiuiHome(JavaVM *) { g_homefeed_starts++; }
 
 static JavaVM_ g_fake_vm;
 int JNIEnv_::GetJavaVM(JavaVM_ **vm) {
@@ -150,6 +156,7 @@ static void resetState() {
     g_exclude_override.clear();
     g_fopen_calls = 0;
     g_core_alive_starts = g_voice_trigger_starts = g_lsplant_preloads = 0;
+    g_homefeed_preloads = g_homefeed_starts = 0;
     g_jni = MockJniKnobs{};
 }
 
@@ -188,7 +195,7 @@ static void testSensitiveSterile(const char *nice) {
 static void testNonSensitiveNoDebug() {
     g_case = "non-sensitive, no debug flag";
     resetState();
-    specialize("com.miui.home");
+    specialize("com.example.someapp");
     CHECK(g_options.empty());                         // not excluded -> no dlclose
     CHECK(g_accessed_paths.size() == 1);              // debug flag probed once
     CHECK(g_accessed_paths[0].find("/debug") != std::string::npos);
@@ -202,10 +209,48 @@ static void testNonSensitiveDebugFlip() {
     g_access_result = 0;            // debug flag "exists"
     g_jni.find_class_ok = true;     // miui.os.Build present
     g_jni.static_bool_value = true; // IS_INTERNATIONAL_BUILD currently true
-    specialize("com.miui.home");
+    specialize("com.example.someapp");
     CHECK(g_jni.set_static_bool_calls == 1);
     CHECK(g_jni.last_set_static_bool == JNI_FALSE);
     CHECK(logsContain("IS_INTERNATIONAL_BUILD -> false"));
+}
+
+static void testMiuiHome() {
+    g_case = "miui home: resident, never flipped";
+    resetState();
+    g_access_result = 0;            // debug flag "exists"
+    g_jni.find_class_ok = true;     // miui.os.Build present
+    g_jni.static_bool_value = true; // IS_INTERNATIONAL_BUILD currently true
+    specialize("com.miui.home");
+    CHECK(g_options.empty());                  // stays resident (no dlclose)
+    CHECK(g_homefeed_preloads == 1);           // lsplant preloaded in pre
+    CHECK(g_homefeed_starts == 1);             // prop-hook worker started in post
+    CHECK(g_jni.set_static_bool_calls == 0);   // launcher is NEVER flipped:
+                                               // CN minus-screen Google branch
+                                               // needs IS_INTERNATIONAL_BUILD=true
+
+    // dotted/colon child processes are the same package
+    resetState();
+    specialize("com.miui.home:recents");
+    CHECK(g_homefeed_starts == 1);
+    CHECK(g_jni.set_static_bool_calls == 0);
+
+    // the exclude list must not unload or flip the launcher either
+    g_case = "miui home: exclusion cannot unload";
+    resetState();
+    char tmp[] = "/tmp/taplus_test_exclude_home.XXXXXX";
+    int fd = mkstemp(tmp);
+    const char *content = "com.miui.home\n";
+    write(fd, content, strlen(content));
+    close(fd);
+    g_exclude_override = tmp;
+    g_jni.find_class_ok = true;
+    g_jni.static_bool_value = true;
+    specialize("com.miui.home");
+    CHECK(g_options.empty());
+    CHECK(g_homefeed_preloads == 1 && g_homefeed_starts == 1);
+    CHECK(g_jni.set_static_bool_calls == 0);
+    unlink(tmp);
 }
 
 static void testSensitivePrefixBoundary() {
@@ -297,6 +342,7 @@ int main() {
     testExclusions();
     testVoiceTrigger();
     testNonSensitiveDebugFlip();
+    testMiuiHome();
     testThemeRegionFlipIsImmediate();
 
     if (g_failures == 0) {

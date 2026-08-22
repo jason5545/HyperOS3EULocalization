@@ -10,7 +10,7 @@ XZ_DIR := vendor/xz/src/linux/lib/xz
 
 include $(CLEAR_VARS)
 LOCAL_MODULE     := taplus_intl_fix
-LOCAL_SRC_FILES  := main.cpp dualwake.cpp art_resolver.cpp \
+LOCAL_SRC_FILES  := main.cpp dualwake.cpp homefeed.cpp art_resolver.cpp \
     $(XZ_DIR)/xz_crc32.c \
     $(XZ_DIR)/xz_crc64.c \
     $(XZ_DIR)/xz_dec_stream.c \

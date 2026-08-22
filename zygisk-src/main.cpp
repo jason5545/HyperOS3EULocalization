@@ -18,6 +18,9 @@
 // - 預設無任何 logcat 輸出；敏感進程連除錯旗標都不讀，永遠靜默
 // - Wallet / Play Store / GMS（含 .unstable，DroidGuard 所在）進程：
 //   最先處理，立即 force denylist unmount + dlclose，不做任何修改
+// - com.miui.home 桌面：永不翻轉 IS_INTERNATIONAL_BUILD（CN 版桌面的
+//   Google 負一屏分支以它為第一道門），也永不 dlclose——homefeed worker
+//   需要在該進程常駐，攔截 ro.com.miui.rsa 的讀取讓 Google Feed 可選
 
 #include <jni.h>
 #include <android/log.h>
@@ -27,6 +30,7 @@
 #include <unistd.h>
 
 #include "dualwake.h"
+#include "homefeed.h"
 #include "zygisk.hpp"
 
 #define LOG_TAG "TaplusIntlFix"
@@ -188,6 +192,7 @@ public:
         theme_manager_ = false;
         core_alive_ = false;
         voice_trigger_ = false;
+        miui_home_ = false;
         if (!args || !args->nice_name) return;
 
         const char *nice = env_->GetStringUTFChars(args->nice_name, nullptr);
@@ -215,10 +220,13 @@ public:
         voice_trigger_ = strcmp(nice, "com.miui.voicetrigger") == 0 ||
                          strncmp(nice, "com.miui.voicetrigger:",
                                  strlen("com.miui.voicetrigger:")) == 0;
+        // 桌面進程：CN 版桌面的 Google 負一屏由 homefeed worker 負責，
+        // 模組必須常駐，且絕不翻轉 IS_INTERNATIONAL_BUILD（見 postAppSpecialize）。
+        miui_home_ = matchesPackageProcess(nice, "com.miui.home");
         skip_ = isExcluded(nice);
-        if (core_alive_ || voice_trigger_) {
-            // 雙喚醒 worker 需要模組常駐；即使排除清單誤加這兩個 package，
-            // 也不能 DLCLOSE 自己。
+        if (core_alive_ || voice_trigger_ || miui_home_) {
+            // 雙喚醒 worker 與桌面 prop hook 都需要模組常駐；即使排除清單
+            // 誤加這些 package，也不能 DLCLOSE 自己。
             skip_ = false;
         }
         if (skip_) {
@@ -229,6 +237,9 @@ public:
             // 仍是 zygote 權限：先讀好 liblsplant.so，post 階段只需 memfd。
             dualwakePreloadLsplant();
         }
+        if (miui_home_) {
+            homefeedPreloadLsplant();
+        }
         env_->ReleaseStringUTFChars(args->nice_name, nice);
     }
 
@@ -236,7 +247,11 @@ public:
         if (core_alive_) dualwakeStartCoreAlive(vm_);
         if (voice_trigger_) dualwakeStartVoiceTrigger(vm_);
         if (theme_manager_) startThemeRegionWorker();
-        if (!skip_) flipInternational();
+        if (miui_home_) homefeedStartMiuiHome(vm_);
+        // 桌面永不翻轉：CN 版 LauncherAssistantCompat.newInstance 以
+        // miui.os.Build.IS_INTERNATIONAL_BUILD 為 Google/global 負一屏的
+        // 第一道門，翻成 false 反而讓 Google Feed 消失。
+        if (!skip_ && !miui_home_) flipInternational();
     }
 
 private:
@@ -247,6 +262,7 @@ private:
     bool theme_manager_ = false;
     bool core_alive_ = false;
     bool voice_trigger_ = false;
+    bool miui_home_ = false;
 
     static bool matchesPackageProcess(const char *nice_name,
                                       const char *package_name) {
