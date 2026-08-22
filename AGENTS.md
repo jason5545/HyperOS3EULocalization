@@ -156,6 +156,35 @@ hasn't loaded within `DUALWAKE_GSA_GRACE` (4) rounds, kill the isolated
 hotword process — at most `DUALWAKE_GSA_MAX_FIXES` (2) times. If no such
 process exists (Voice Match off / not bound yet), just keep watching.
 
+The BootupReceiver re-delivery (`am broadcast` — on this build just a shim
+over `cmd activity`, so the failure is the native `cmd: Failure calling
+service activity: Failed transaction (2147483646)`) can fail **wholesale**
+during the boot storm: 2026-08-22 10:28-10:29 measured 3/3 rounds failing
+while AMS was overloaded; XiaoAI only survived because it self-armed at
+boot+44s. `redeliver_bootup` therefore retries in-round
+(`DUALWAKE_RETRY_MAX` 3 attempts, `DUALWAKE_RETRY_INTERVAL` 2s apart) and
+logs every attempt's outcome; success is judged by the output containing
+`Broadcast completed`, not by rc alone. Host test simulates this with the
+`am_fails=N` stub knob (test cases 9-10). Host-test pitfall that hid in
+plain sight: macOS bash 3.2 (`/bin/sh`) silently drops bytes when a
+`$var` expansion is immediately followed by a multibyte char in a
+double-quoted string (`"rc=$rc）"` loses the value and the lead byte of
+`）`) — always write `${var}` before CJK/full-width punctuation in worker
+log lines, or host-side log assertions go silently wrong.
+
+2026-08-22 post-mortem of the "v1.0.22 broke dual wake" report: **not a
+regression**. Middleware/soundtrigger dumps proved both chains armed by
+10:29:27 and stayed in the same processes/models all boot; the only proven
+dead windows were two phone calls (10:29:39-10:31:51, 10:32:47-10:33:01)
+during which SoundTrigger is globally DISABLED by design (GSA
+STOP_RECOGNITION, XiaoAI RECOGNITION status 1/abort) — dual wake is
+expected to be dead in a call. The single screen-off 小愛 attempt at
+11:28:36 fired the DSP but was rejected by XiaoAI's own second-stage
+verification in 972ms (no launch, recognition re-armed) — acoustic/
+pocket-level rejection, not a chain failure; every attempt from 11:37:31
+onward (both sides, screen on) succeeded end-to-end. Nothing in v1.0.22
+(MiuiHome payload, homefeed hooks) touches the hotword path.
+
 `service.sh` gates this on `voice_trigger_enabled=1` and XiaoAI not being
 the default assistant.
 

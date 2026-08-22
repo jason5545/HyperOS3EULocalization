@@ -34,6 +34,8 @@
 #   DUALWAKE_MAX_TRIES     最多幾輪（預設 12）
 #   DUALWAKE_GSA_GRACE     小愛武裝後給 GSA 自己載入的輪數（預設 4）
 #   DUALWAKE_GSA_MAX_FIXES 最多重建 GSA AoHD 鏈幾次（預設 2）
+#   DUALWAKE_RETRY_MAX     每輪重送開機廣播最多試幾次（預設 3）
+#   DUALWAKE_RETRY_INTERVAL 同一輪內重試間隔秒數（預設 2）
 #   DUALWAKE_KILL_BIN      kill 指令路徑（預設 kill；主機端測試用 stub 取代，
 #                          因為 POSIX sh 的 kill 是 builtin,PATH stub 蓋不掉）
 #   DUALWAKE_LOG           記錄檔路徑（預設 /dev/null）
@@ -42,6 +44,8 @@ INTERVAL="${DUALWAKE_INTERVAL:-15}"
 MAX_TRIES="${DUALWAKE_MAX_TRIES:-12}"
 GSA_GRACE="${DUALWAKE_GSA_GRACE:-4}"
 GSA_MAX_FIXES="${DUALWAKE_GSA_MAX_FIXES:-2}"
+RETRY_MAX="${DUALWAKE_RETRY_MAX:-3}"
+RETRY_INTERVAL="${DUALWAKE_RETRY_INTERVAL:-2}"
 KILL_BIN="${DUALWAKE_KILL_BIN:-kill}"
 LOG="${DUALWAKE_LOG:-/dev/null}"
 
@@ -67,9 +71,27 @@ gsa_hotword_pids() {
 }
 
 redeliver_bootup() {
-    am broadcast -a android.intent.action.BOOT_COMPLETED \
-        -n com.miui.voiceassist/com.xiaomi.voiceassistant.voiceTrigger.adapter.BootupReceiver \
-        >> "$LOG" 2>&1
+    # 開機風暴裡 AMS 可能整批拒絕 binder transaction（2026-08-22 實測連續
+    # 三輪全失敗：cmd: Failure calling service activity: Failed transaction
+    # (2147483646)——am 只是轉送 cmd activity 的 shell script）。一輪只送
+    # 一次等於整輪浪費，因此失敗時短退避再試，每次結果都寫進記錄檔。
+    # 成功與否以最後一行輸出為準（rc 只是輔助，cmd 失敗時回 1）。
+    attempt=0
+    while [ "$attempt" -lt "$RETRY_MAX" ]; do
+        attempt=$((attempt + 1))
+        out=$(am broadcast -a android.intent.action.BOOT_COMPLETED \
+            -n com.miui.voiceassist/com.xiaomi.voiceassistant.voiceTrigger.adapter.BootupReceiver 2>&1)
+        rc=$?
+        case "$out" in
+        *"Broadcast completed"*)
+            echo "  BootupReceiver 第 ${attempt} 次送出成功（rc=${rc}）" >> "$LOG"
+            return 0
+            ;;
+        esac
+        echo "  BootupReceiver 第 ${attempt} 次失敗（rc=${rc}）：$(echo "$out" | tail -n 1)" >> "$LOG"
+        [ "$attempt" -lt "$RETRY_MAX" ] && sleep "$RETRY_INTERVAL"
+    done
+    return 1
 }
 
 try=0
@@ -78,8 +100,9 @@ fixes=0
 while [ "$try" -lt "$MAX_TRIES" ]; do
     if ! xiaoai_armed; then
         # 未武裝：立刻重送開機廣播喚起官方鏈（BOOT_COMPLETED 在開機風暴的
-        # 廣播佇列裡可能等 90 秒以上，這裡主動戳；AMS 忙不過來會失敗，下一輪
-        # 再試），再等 INTERVAL 進入下一輪。
+        # 廣播佇列裡可能等 90 秒以上，這裡主動戳；AMS 忙不過來會整批拒絕
+        # transaction，redeliver_bootup 同輪內短退避多試幾次，全敗才等
+        # INTERVAL 進入下一輪）。
         try=$((try + 1))
         echo "try $try: VoiceTrigger 未武裝，重送 BootupReceiver $(date)" >> "$LOG"
         redeliver_bootup
