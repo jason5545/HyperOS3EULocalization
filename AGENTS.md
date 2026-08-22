@@ -12,7 +12,9 @@ Magisk/KernelSU module: HyperOS 3 EU localization — XiaoAI voice stack, Taplus
 - `zygisk-src/` — Zygisk module (`main.cpp` = Taplus INTL flip + sensitive-process
   policy, `dualwake.cpp` = dual wake, `homefeed.cpp` = MiuiHome CN Google-feed
   prop hook, `art_resolver.cpp` = ART symbol resolver)
-- `zygisk-src/test/` — host-side mock test (no device needed)
+- `zygisk-src/test/` — host-side mock test (no device needed); `test/hooker/` —
+  JVM regression test for the `jrc.homefeed` hookers (hand-rolled Android stubs
+  + fake hook-target classes with the same shapes as the pinned CN build)
 - `scripts/build_zygisk.sh` — native build (needs `NDK_BUILD=/path/to/ndk-build`)
 - `dualwake_boot.sh` — dual-wake cold-boot watchdog, copied by `service.sh` to
   `/data/local/tmp` and run in the background (see "Dual-wake boot race" below)
@@ -26,6 +28,7 @@ Magisk/KernelSU module: HyperOS 3 EU localization — XiaoAI voice stack, Taplus
 
 ```sh
 sh zygisk-src/test/run_test.sh                                 # regression gate
+sh zygisk-src/test/run_hooker_test.sh                          # hooker JVM gate
 sh scripts/test_dualwake_boot.sh                               # boot watchdog gate
 NDK_BUILD="$HOME/Library/Android/sdk/ndk/<ver>/ndk-build" \
     sh scripts/build_zygisk.sh                                 # native .so

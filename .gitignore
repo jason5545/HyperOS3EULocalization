@@ -29,6 +29,7 @@ zygisk-src/libs/
 zygisk-src/obj/
 zygisk-src/build/
 zygisk-src/gen/
+zygisk-src/test/hooker/build/
 zygisk-src/vendor/dobby/src/
 zygisk-src/vendor/dobby/build/
 .tmp-verify/
