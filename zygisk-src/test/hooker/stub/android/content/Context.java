@@ -8,6 +8,9 @@ public class Context {
     private final ClassLoader loader;
     private final String packageName;
 
+    public Intent lastStarted;      // set by startActivity
+    public boolean failStart;       // startActivity throws when true
+
     public Context(PackageManager pm, ClassLoader loader, String packageName) {
         this.pm = pm;
         this.loader = loader;
@@ -19,4 +22,9 @@ public class Context {
     public ClassLoader getClassLoader() { return loader; }
 
     public String getPackageName() { return packageName; }
+
+    public void startActivity(Intent intent) {
+        if (failStart) throw new RuntimeException("activity not found: " + intent);
+        lastStarted = intent;
+    }
 }

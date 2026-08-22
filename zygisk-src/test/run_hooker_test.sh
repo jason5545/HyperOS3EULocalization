@@ -15,6 +15,7 @@ javac -d "$BUILD_DIR" \
     $(find "$DIR/hooker/stub" "$DIR/hooker/fake" -name '*.java') \
     "$DIR/../java/jrc/homefeed/HomeRsaHooker.java" \
     "$DIR/../java/jrc/homefeed/MinusScreenHooker.java" \
+    "$DIR/../java/jrc/homefeed/WidgetPickerHooker.java" \
     "$DIR/hooker/HookerTestMain.java"
 
 java -cp "$BUILD_DIR" HookerTestMain

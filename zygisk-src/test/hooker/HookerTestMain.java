@@ -7,16 +7,23 @@ import android.content.pm.ServiceInfo;
 import android.os.Bundle;
 
 import com.google.android.libraries.gsa.launcherclient.LauncherClient;
+import com.miui.home.launcher.Application;
 import com.miui.home.launcher.BaseLauncher;
+import com.miui.home.launcher.DeviceConfig;
 import com.miui.home.launcher.LauncherAssistantCompat;
 import com.miui.home.launcher.LauncherAssistantCompatGoogle;
 import com.miui.home.launcher.LauncherAssistantCompatMIUI;
+import com.miui.home.launcher.MIUIWidgetUtil;
+import com.miui.home.launcher.ShortcutInfo;
+import com.miui.home.library.utils.AsyncTaskExecutorHelper;
+import com.miui.home.model.api.ItemInfo;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
 import jrc.homefeed.HomeRsaHooker;
 import jrc.homefeed.MinusScreenHooker;
+import jrc.homefeed.WidgetPickerHooker;
 
 /**
  * Host-side regression test for the MiuiHome homefeed hookers (no device, no
@@ -48,6 +55,12 @@ public final class HookerTestMain {
 
     public static LauncherAssistantCompat fakeNewInstance(BaseLauncher launcher) {
         return (LauncherAssistantCompat) presetNewInstance;
+    }
+
+    private static int fakeGotoPickerCalls;
+
+    public static void fakeGotoPicker(BaseLauncher launcher, ItemInfo itemInfo) {
+        fakeGotoPickerCalls++;
     }
 
     private static Method backupOf(String name, Class<?>... params) throws Exception {
@@ -200,6 +213,122 @@ public final class HookerTestMain {
         throw new NoSuchFieldException(name);
     }
 
+    // ---- widget picker hooker cases ------------------------------------------
+
+    private static final String PA_PKG = "com.miui.personalassistant";
+    private static final String PICKER_HOME =
+            PA_PKG + ".picker.business.home.pages.PickerHomeActivity";
+    private static final String PICKER_DETAIL =
+            PA_PKG + ".picker.business.detail.PickerDetailActivity";
+
+    private static WidgetPickerHooker newPickerHooker() throws Exception {
+        WidgetPickerHooker hooker = new WidgetPickerHooker();
+        hooker.backup = backupOf("fakeGotoPicker", BaseLauncher.class, ItemInfo.class);
+        fakeGotoPickerCalls = 0;
+        MIUIWidgetUtil.support = false;
+        DeviceConfig.p19LowMem = false;
+        AsyncTaskExecutorHelper.bus.posts = 0;
+        return hooker;
+    }
+
+    private static Context recordingContext() {
+        Context ctx = new Context(new PackageManager(),
+                HookerTestMain.class.getClassLoader(), "com.miui.home");
+        Application.setInstance(new Application(ctx));
+        return ctx;
+    }
+
+    private static void testWidgetPickerRerouteHome() throws Throwable {
+        caseName = "widget picker reroute to picker home";
+        WidgetPickerHooker hooker = newPickerHooker();
+        Context ctx = recordingContext();
+        BaseLauncher launcher = new BaseLauncher();
+
+        hooker.callback(new Object[]{launcher, null});
+
+        check(fakeGotoPickerCalls == 0, "original must NOT run when PA picker opens");
+        check(ctx.lastStarted != null, "PA picker activity must be started");
+        check(ctx.lastStarted != null && ctx.lastStarted.component != null
+                        && PA_PKG.equals(ctx.lastStarted.component.getPackageName())
+                        && PICKER_HOME.equals(ctx.lastStarted.component.getClassName()),
+                "component must be PA PickerHomeActivity, got "
+                        + (ctx.lastStarted == null ? null : ctx.lastStarted.component));
+        if (ctx.lastStarted != null) {
+            check(Integer.valueOf(2).equals(ctx.lastStarted.extrasInt.get("openSource")),
+                    "openSource must be 2, got " + ctx.lastStarted.extrasInt);
+            check(Integer.valueOf(10).equals(ctx.lastStarted.extrasInt.get("picker_tip_source")),
+                    "picker_tip_source must be 10, got " + ctx.lastStarted.extrasInt);
+            check((ctx.lastStarted.flags & 0x10000000) != 0
+                            && (ctx.lastStarted.flags & 0x8000) != 0,
+                    "original intent flags must be kept, got " + ctx.lastStarted.flags);
+            check(ctx.lastStarted.data == null, "home picker must not carry data uri");
+        }
+        check(launcher.closeFolderCalls == 1 && launcher.lastCloseFolderArg,
+                "closeFolder(!isCloseAnimator) must run once like the original");
+        check(AsyncTaskExecutorHelper.bus.posts == 1,
+                "AssistantConnectMessage must be posted like the original");
+    }
+
+    private static void testWidgetPickerRerouteDetail() throws Throwable {
+        caseName = "widget picker reroute to picker detail";
+        WidgetPickerHooker hooker = newPickerHooker();
+        Context ctx = recordingContext();
+        ShortcutInfo shortcut = new ShortcutInfo("com.xiaomi.test", "測試");
+
+        hooker.callback(new Object[]{new BaseLauncher(), shortcut});
+
+        check(fakeGotoPickerCalls == 0, "original must NOT run when PA detail opens");
+        check(ctx.lastStarted != null && ctx.lastStarted.component != null
+                        && PICKER_DETAIL.equals(ctx.lastStarted.component.getClassName()),
+                "component must be PA PickerDetailActivity, got "
+                        + (ctx.lastStarted == null ? null : ctx.lastStarted.component));
+        if (ctx.lastStarted != null && ctx.lastStarted.data != null) {
+            String uri = ctx.lastStarted.data.toString();
+            check(uri.startsWith("widget://picker/detail?packageName=com.xiaomi.test"),
+                    "detail uri must carry packageName, got " + uri);
+            check(uri.contains("appName=測試") && uri.contains("picker_tip_source=3"),
+                    "detail uri must carry appName and picker_tip_source=3, got " + uri);
+        } else {
+            check(false, "detail picker must carry widget://picker/detail uri");
+        }
+    }
+
+    private static void testWidgetPickerSupportPassthrough() throws Throwable {
+        caseName = "widget picker support=true passthrough";
+        WidgetPickerHooker hooker = newPickerHooker();
+        MIUIWidgetUtil.support = true;  // 原生路徑可走通：不得介入
+        Context ctx = recordingContext();
+
+        hooker.callback(new Object[]{new BaseLauncher(), null});
+
+        check(fakeGotoPickerCalls == 1, "original must run when stock logic works");
+        check(ctx.lastStarted == null, "PA picker must NOT be started by the hook");
+    }
+
+    private static void testWidgetPickerP19Passthrough() throws Throwable {
+        caseName = "widget picker P19 low-mem passthrough";
+        WidgetPickerHooker hooker = newPickerHooker();
+        DeviceConfig.p19LowMem = true;
+        Context ctx = recordingContext();
+
+        hooker.callback(new Object[]{new BaseLauncher(), null});
+
+        check(fakeGotoPickerCalls == 1, "P19 device must keep the original fallback");
+        check(ctx.lastStarted == null, "PA picker must NOT be started on P19");
+    }
+
+    private static void testWidgetPickerStartFailureFallback() throws Throwable {
+        caseName = "widget picker start failure fallback";
+        WidgetPickerHooker hooker = newPickerHooker();
+        Context ctx = recordingContext();
+        ctx.failStart = true;  // PA 不存在/被停用時 startActivity 會丟
+
+        hooker.callback(new Object[]{new BaseLauncher(), null});
+
+        check(fakeGotoPickerCalls == 1,
+                "start failure must fall back to the original showWidgetsPreviewLayout");
+    }
+
     /** Fake ctors are package-private like production; build via reflection. */
     private static LauncherAssistantCompat newCompat(Class<?> cls, String pkg)
             throws Exception {
@@ -217,6 +346,11 @@ public final class HookerTestMain {
         testServiceVersionHealthyUntouched();
         testServiceVersionGiveUp();
         testMinusScreenReroute();
+        testWidgetPickerRerouteHome();
+        testWidgetPickerRerouteDetail();
+        testWidgetPickerSupportPassthrough();
+        testWidgetPickerP19Passthrough();
+        testWidgetPickerStartFailureFallback();
 
         if (failures == 0) {
             System.out.println("ALL HOOKER TESTS PASSED");

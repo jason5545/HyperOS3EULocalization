@@ -52,6 +52,7 @@ size_t g_lsplant_size = 0;
 void *g_lsplant_handle = nullptr;      // dlopen 後永不 dlclose：hook 存活期間需要
 jobject g_hooker_ref = nullptr;        // hooker 實例的額外 GC root
 jobject g_hooker_ref2 = nullptr;       // MinusScreenHooker 的 GC root
+jobject g_hooker_ref3 = nullptr;       // WidgetPickerHooker 的 GC root
 
 bool clearException(JNIEnv *env, const char *what) {
     if (!env->ExceptionCheck()) return false;
@@ -268,6 +269,103 @@ void installMinusScreenHook(JNIEnv *env, jobject application, jobject loader,
     env->DeleteLocalRef(hooker_cls);
 }
 
+// 在 com.miui.home 內對 WidgetManagerUtils.gotoPicker 裝第三個 lsplant
+// hook：「小工具」按鈕在 EU（無 com.mi.globalminusscreen）永遠退回內建清單頁，
+// 由 jrc.homefeed.WidgetPickerHooker 改導 personalassistant 的小部件中心。
+// 所有查找失敗都只記 log 後返回，絕不讓例外逸出到 app。
+void installWidgetPickerHook(JNIEnv *env, jobject application, jobject loader,
+                             LsplantHookFn lsplant_hook,
+                             LsplantIsHookedFn lsplant_is_hooked) {
+    jclass hooker_cls = loadClassWith(env, loader, "jrc.homefeed.WidgetPickerHooker");
+    if (!hooker_cls) {
+        LOGW("MiuiHome: widget-picker hooker class unavailable, skip");
+        return;
+    }
+
+    jmethodID default_ctor = env->GetMethodID(hooker_cls, "<init>", "()V");
+    jobject hooker = default_ctor ? env->NewObject(hooker_cls, default_ctor) : nullptr;
+    if (clearException(env, "picker hooker new") || !hooker) {
+        env->DeleteLocalRef(hooker_cls);
+        return;
+    }
+
+    jmethodID callback = env->GetMethodID(
+            hooker_cls, "callback", "([Ljava/lang/Object;)Ljava/lang/Object;");
+    jobject callback_method = callback
+            ? env->ToReflectedMethod(hooker_cls, callback, JNI_FALSE) : nullptr;
+    if (clearException(env, "picker callback method") || !callback_method) {
+        env->DeleteLocalRef(hooker);
+        env->DeleteLocalRef(hooker_cls);
+        return;
+    }
+
+    // 目標在 app classpath：用 app 的 classloader 載入。
+    jclass app_class = env->GetObjectClass(application);
+    jmethodID get_class_loader = app_class
+            ? env->GetMethodID(app_class, "getClassLoader", "()Ljava/lang/ClassLoader;")
+            : nullptr;
+    jobject app_loader = (app_class && get_class_loader)
+            ? env->CallObjectMethod(application, get_class_loader) : nullptr;
+    if (clearException(env, "picker app classloader")) app_loader = nullptr;
+
+    jclass target_cls = app_loader
+            ? loadClassWith(env, app_loader,
+                            "com.miui.home.launcher.common.WidgetManagerUtils")
+            : nullptr;
+    jmethodID target_mid = target_cls
+            ? env->GetStaticMethodID(
+                      target_cls, "gotoPicker",
+                      "(Lcom/miui/home/launcher/BaseLauncher;"
+                      "Lcom/miui/home/model/api/ItemInfo;)V")
+            : nullptr;
+    jobject target_method = (target_cls && target_mid)
+            ? env->ToReflectedMethod(target_cls, target_mid, JNI_TRUE) : nullptr;
+    if (clearException(env, "picker target lookup") || !target_method) {
+        LOGW("MiuiHome: gotoPicker target missing, skip");
+        if (target_cls) env->DeleteLocalRef(target_cls);
+        if (app_loader) env->DeleteLocalRef(app_loader);
+        if (app_class) env->DeleteLocalRef(app_class);
+        env->DeleteLocalRef(hooker);
+        env->DeleteLocalRef(hooker_cls);
+        return;
+    }
+    env->DeleteLocalRef(target_cls);
+    if (app_loader) env->DeleteLocalRef(app_loader);
+    if (app_class) env->DeleteLocalRef(app_class);
+
+    jobject backup = lsplant_hook(env, target_method, hooker, callback_method);
+    if (clearException(env, "picker lsplant Hook") || !backup) {
+        LOGW("MiuiHome: widget-picker lsplant Hook returned null");
+        env->DeleteLocalRef(target_method);
+        env->DeleteLocalRef(hooker);
+        env->DeleteLocalRef(hooker_cls);
+        return;
+    }
+
+    jfieldID backup_field = env->GetFieldID(
+            hooker_cls, "backup", "Ljava/lang/reflect/Method;");
+    if (clearException(env, "picker backup field") || !backup_field) {
+        env->DeleteLocalRef(target_method);
+        env->DeleteLocalRef(hooker);
+        env->DeleteLocalRef(hooker_cls);
+        return;
+    }
+    env->SetObjectField(hooker, backup_field, backup);
+    if (clearException(env, "picker backup set")) {
+        env->DeleteLocalRef(target_method);
+        env->DeleteLocalRef(hooker);
+        env->DeleteLocalRef(hooker_cls);
+        return;
+    }
+
+    const bool hooked = lsplant_is_hooked(env, target_method);
+    LOGI("MiuiHome widget-picker hook installed (IsHooked=%d)", hooked ? 1 : 0);
+    g_hooker_ref3 = env->NewGlobalRef(hooker);
+    env->DeleteLocalRef(target_method);
+    env->DeleteLocalRef(hooker);
+    env->DeleteLocalRef(hooker_cls);
+}
+
 void *miuiHomeWorker(void *opaque) {
     auto *vm = static_cast<JavaVM *>(opaque);
     JNIEnv *env = nullptr;
@@ -421,6 +519,13 @@ void *miuiHomeWorker(void *opaque) {
         // 失敗只記 log，不影響已裝好的 prop hook。
         installMinusScreenHook(env, application, loader, lsplant_hook,
                                lsplant_is_hooked);
+
+        // 第三個 hook（同進程、同 lsplant）：「小工具」按鈕改導
+        // personalassistant 的小部件中心（EU 無 globalminusscreen 時
+        // isMIUIWidgetSupport 恆 false，原生只會退回內建清單頁）。
+        // 失敗只記 log，不影響前兩個已裝好的 hook。
+        installWidgetPickerHook(env, application, loader, lsplant_hook,
+                                lsplant_is_hooked);
     } while (false);
 
     if (hooker) env->DeleteLocalRef(hooker);

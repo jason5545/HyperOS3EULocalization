@@ -10,8 +10,9 @@ Magisk/KernelSU module: HyperOS 3 EU localization — XiaoAI voice stack, Taplus
   xiaomi.eu 308 base already ships these grants)
 - `payload/` — data-app APKs installed by the on-device service script
 - `zygisk-src/` — Zygisk module (`main.cpp` = Taplus INTL flip + sensitive-process
-  policy, `dualwake.cpp` = dual wake, `homefeed.cpp` = MiuiHome CN Google-feed
-  prop hook, `art_resolver.cpp` = ART symbol resolver)
+  policy, `dualwake.cpp` = dual wake, `homefeed.cpp` = MiuiHome hooks: Google-feed
+  prop, minus-screen reroute, widget-picker reroute, `art_resolver.cpp` = ART
+  symbol resolver)
 - `zygisk-src/test/` — host-side mock test (no device needed); `test/hooker/` —
   JVM regression test for the `jrc.homefeed` hookers (hand-rolled Android stubs
   + fake hook-target classes with the same shapes as the pinned CN build)
@@ -98,6 +99,21 @@ sources changed, rebuild the .so first, then test, then pack.
   and a real globalminusscreen install pass through untouched. Live source
   switching works because `AssistantLauncherCallbacksWrap.reloadMinusScreen()`
   re-runs `newInstance`.
+- The edit-mode 小工具 button (`WidgetManagerUtils.gotoPicker`) is rerouted by
+  `WidgetPickerHooker`: `MIUIWidgetUtil.isMIUIWidgetSupport()` chains into
+  `MIUIWidgetCompat.sAssistantWidget`, which is chosen by
+  `IS_INTERNATIONAL_BUILD` — on EU it is always `AssistantWidgetCompatGlobal`,
+  whose `isSupportMIUIWidget` requires `com.mi.globalminusscreen` as a system
+  app, so the button always fell back to the built-in AOSP-style list and the
+  小部件中心 never opened. The hook re-fires the CN intent verbatim
+  (openSource=2 / picker_tip_source / `widget://picker/detail` URI) at the
+  installed PersonalAssistant's `picker.business.home.pages.PickerHomeActivity`
+  (verified working on-device via `widget://picker/home`). It only engages when
+  `isMIUIWidgetSupport()` is false and the device is not P19-low-mem; a working
+  stock path (real globalminusscreen) and any startActivity failure both fall
+  through to the original method unchanged. Do NOT "fix" this by flipping
+  `IS_INTERNATIONAL_BUILD` for com.miui.home — the Google minus-screen branch
+  above depends on it staying true.
 - Package matching treats `pkg:child` and `pkg.child` as the same package;
   bare prefixes (`com.google.android.gmsx`) must not match.
 - ThemeManager region flip must land before the app's first API request:
