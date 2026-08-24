@@ -172,3 +172,15 @@ if [ "$(settings get global voice_trigger_enabled)" = "1" ]; then
         ;;
     esac
 fi
+
+# --- gms/wallet/vending mount namespace 清道夫 ------------------------------
+# 2026-08-24 實測定因（細節見 mount_scrub.sh 檔頭）：KSU 的 per-app umount
+# 只在 specialize 生效一次；其他模組腳本的 runtime bind（BW_Audio dolby/
+# quasar、morphe 修補 APK）會經 shared propagation 滲入還活著的 Google
+# 進程，/proc/self/mountinfo 出現 /adb/modules 來源 → DroidGuard 判 root
+# （Wallet/GMS「有時跳提示、殺掉重開就好」的成因）。worker 週期性清掉
+# 這三族進程 namespace 裡的 /adb/modules 來源掛載，同 dualwake 模式：
+# 複製到 /data/local/tmp 執行，不常駐帶模組路徑的 shell。
+SCRUB_TMP=/data/local/tmp/jrc_mount_scrub.sh
+cp "$MODDIR/mount_scrub.sh" "$SCRUB_TMP"
+MOUNT_SCRUB_LOG="$MODDIR/mount_scrub.log" nohup sh "$SCRUB_TMP" >/dev/null 2>&1 &

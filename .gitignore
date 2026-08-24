@@ -25,6 +25,8 @@ tests/
 !scripts/
 scripts/*
 !scripts/build_zygisk.sh
+!scripts/test_dualwake_boot.sh
+!scripts/test_mount_scrub.sh
 zygisk-src/libs/
 zygisk-src/obj/
 zygisk-src/build/

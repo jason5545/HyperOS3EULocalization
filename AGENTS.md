@@ -20,7 +20,11 @@ Magisk/KernelSU module: HyperOS 3 EU localization — XiaoAI voice stack, Taplus
 - `scripts/build_zygisk.sh` — native build (needs `NDK_BUILD=/path/to/ndk-build`)
 - `dualwake_boot.sh` — dual-wake cold-boot watchdog, copied by `service.sh` to
   `/data/local/tmp` and run in the background (see "Dual-wake boot race" below)
+- `mount_scrub.sh` — sensitive-process mount-namespace scrubber, same
+  `/data/local/tmp` background-worker pattern (see "Sensitive-process mount
+  scrub" below)
 - `scripts/test_dualwake_boot.sh` — host-side shell test for the watchdog
+- `scripts/test_mount_scrub.sh` — host-side shell test for the scrubber
 - `build.sh` — packs `dist/HyperOS3_EU_XiaoAI_Portal_MiPay_<version>.zip`
 - `customize.sh`, `tools/unity_install.sh` — install-time logic on device
 
@@ -32,6 +36,7 @@ Magisk/KernelSU module: HyperOS 3 EU localization — XiaoAI voice stack, Taplus
 sh zygisk-src/test/run_test.sh                                 # regression gate
 sh zygisk-src/test/run_hooker_test.sh                          # hooker JVM gate
 sh scripts/test_dualwake_boot.sh                               # boot watchdog gate
+sh scripts/test_mount_scrub.sh                                 # mount scrub gate
 NDK_BUILD="$HOME/Library/Android/sdk/ndk/<ver>/ndk-build" \
     sh scripts/build_zygisk.sh                                 # native .so
 sh build.sh                                                    # release zip
@@ -260,6 +265,58 @@ Residual known risk: an audioserver crash *after* the worker's boot window
 can still stale the chain silently; there is no cheap external detector
 (middleware shows ACTIVE throughout) — recovery is the same kill, done
 manually.
+
+## Sensitive-process mount scrub (root cause, 2026-08-24 on myron)
+
+Symptom: Wallet/GMS intermittently prompted "device is rooted"; killing the
+app and relaunching always "fixed" it. Live-captured while the prompt was
+showing: `com.google.android.gms` / `gms.persistent` mountinfo carried **6**
+bind mounts sourced from `/adb/modules/...`, `gms.unstable` (DroidGuard's
+home) carried 1, wallet/vending were clean. Maps were sterile everywhere
+(our `.so` only lives in `com.miui.home` / `com.miui.voicetrigger`, by
+design) — **the leak was never ours**.
+
+Mechanism: KernelSU's per-app "umount modules" runs **once at specialize**
+and only covers mounts KSU itself tracks. Third-party module scripts that
+hand-roll `mount --bind` (BW_Audio's dolby/quasar XMLs — re-bound by its
+watchdog on **every audioserver restart**; the morphe modules bind patched
+APKs over `base.apk`) are not tracked, and runtime re-binds **propagate via
+the shared mount peer group into still-running long-lived processes**
+(gms.persistent/gms essentially never die). DroidGuard reads
+`/proc/self/mountinfo`, sees `/adb/modules/...`, flags root. Relaunching the
+app re-runs specialize → umount → clean → passes, until the next re-bind
+re-dirties it. That is the exact intermittent pattern.
+
+Fix: `mount_scrub.sh` (same `/data/local/tmp` nohup pattern as
+dualwake_boot.sh, started unconditionally by `service.sh`) scrubs every 15s:
+for each live gms(+`:…`/`.…` children)/wallet/vending process — the same
+list as `isSensitiveProcess` in `main.cpp` — it finds mountinfo entries
+whose **field 4** (source path within the source fs; `/data/adb/modules`
+shows as `/adb/modules`) starts with `/adb/modules/` and `nsenter -t <pid>
+-m -- umount -l <mountpoint>` them. Verified live: one round cleaned all 5
+processes incl. a Wallet that restarted mid-test; pid 1's mount count never
+decreased and audioserver/BW_Audio kept working (only the propagated copies
+inside app namespaces are detached — the master binds in the root namespace
+are never touched).
+
+Safety invariants (host test `scripts/test_mount_scrub.sh` covers them):
+
+- The pgrep patterns MUST stay anchored (`^com…`): an unanchored
+  `pgrep -f` also matches the adb/su shell whose own cmdline contains the
+  package names, and nsenter-ing into THAT umounts the **root namespace's
+  master binds** (observed first-hand during the manual verification).
+- Match only field 4 with an `/adb/modules/` prefix — adbd's functionfs
+  (`/dev/usb-ffs/adb`) and KSU/hybrid overlays are different shapes and must
+  never be touched.
+- toybox `nsenter` eats `umount`'s `-l` as its own option — the `--`
+  separator is mandatory.
+- Financial processes must NEVER be added to the scrub list: their RASP
+  flags the "was umounted" state itself (see the financial invariant above);
+  gms/wallet/vending already live with KSU's specialize-time umount, so
+  scrubbing changes nothing observable for them.
+
+On a susfs kernel this whole class disappears (`hide_sus_mnts`); myron runs
+the official GKI kernel, so the scrubber is the stock-kernel equivalent.
 
 ## Deploy
 

@@ -36,11 +36,13 @@ payload/cn-media/MiuiThemeManagerCnOverlay.apk
 payload/xiaoai/MIUIXiaoAiSpeechEngine.apk
 "
 
-# 單檔 systemless payload：priv-app 授權 XML（補 CN 有、EU 缺的 grants）
-# 與雙喚醒冷開機保底 worker（service.sh 開機時複製到 /data/local/tmp 執行）
+# 單檔 systemless payload：priv-app 授權 XML（補 CN 有、EU 缺的 grants）、
+# 雙喚醒冷開機保底 worker 與敏感進程 mount 清道夫
+# （worker 皆由 service.sh 複製到 /data/local/tmp 執行）
 FILE_PAYLOADS="
 system/product/etc/permissions/privapp-permissions-hyperos3eu.xml
 dualwake_boot.sh
+mount_scrub.sh
 "
 
 EXCLUDED_PATHS="
