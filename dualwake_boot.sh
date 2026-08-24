@@ -29,6 +29,18 @@
 #   就位，小愛 session 完全不受影響）。最多重建 DUALWAKE_GSA_MAX_FIXES
 #   次。殺的是一般 App process，不碰音訊服務，通話中也不用避讓。
 #
+#   2026-08-24 第三種故障型態（實測）：AoHD 在 HDS 綁定「之前」就卡死
+#   ——soundtrigger 只有 ATTACH/GET_MODULE_PROPERTIES（14:09:57），isolated
+#   process 從未出現，dumpsys voiceinteraction 顯示 No Hotword detection
+#   connection，GSA 自己 dump No detector，一卡 4.5 小時不自愈。此時沒有
+#   isolated process 可殺（舊版只能觀望到放棄）；改殺 GSA 的 VIS 進程
+#   （GsaVoiceInteractionService 所在，processName 由 voiceinteraction dump
+#   解析，目前為 :interactor），system_server 自動重綁 VIS → onReady 重建
+#   AoHD（活體驗證 18:57:05 kill → 18:57:11 re-ATTACH + 模型載入）。
+#   僅在 GSA 是預設 VIS 且已註冊聲紋（dump 帶 X Google vendorUuid）時動手，
+#   與 isolated-process kill 共用 DUALWAKE_GSA_MAX_FIXES 額度；否則真的是
+#   Voice Match 沒開或預設助理不是 Google，只能觀望。
+#
 # 環境變數（主要給主機端測試用）：
 #   DUALWAKE_INTERVAL      每輪間隔秒數（預設 15）
 #   DUALWAKE_MAX_TRIES     最多幾輪（預設 12）
@@ -68,6 +80,21 @@ gsa_armed() {
 gsa_hotword_pids() {
     # isolated hotword process；[e] 技巧避免 pgrep 比到自己的 cmdline
     pgrep -f 'googlequicksearchbox:trusted_disable_art_imag[e]'
+}
+
+gsa_vis_pid() {
+    # 無 isolated process 時的重建對象：GSA 的 VIS（GsaVoiceInteractionService）
+    # 進程。預設語音互動服務不是 GSA（processName 不含 googlequicksearchbox）
+    # 或 Voice Match 未註冊（dump 沒有 X Google 的 vendorUuid）時回傳空——
+    # 那是真的沒對象可殺，只能觀望。
+    vi=$(dumpsys voiceinteraction 2>/dev/null) || return 0
+    case "$vi" in
+    *7038ddc8-30f2*) ;;
+    *) return 0 ;;
+    esac
+    vis_proc=$(printf '%s\n' "$vi" | sed -n 's/^ *processName=\(com\.google\.android\.googlequicksearchbox:[^ ]*\).*$/\1/p' | head -n 1)
+    [ -n "$vis_proc" ] || return 0
+    pgrep -f "^$vis_proc\$"
 }
 
 redeliver_bootup() {
@@ -122,10 +149,20 @@ while [ "$try" -lt "$MAX_TRIES" ]; do
                 fixes=$((fixes + 1))
                 # 殺 isolated process（可能多個，空白分隔）；系統自動重綁
                 "$KILL_BIN" $pids
-                echo "try $try: GSA 模型未載入，重建 AoHD 鏈（kill $(echo $pids)，第 $fixes 次）$(date)" >> "$LOG"
+                echo "try $try: GSA 模型未載入，重建 AoHD 鏈（kill $(echo $pids)，第 ${fixes} 次）$(date)" >> "$LOG"
                 armed_rounds=0
             else
-                echo "try $try: GSA 未載入且無 isolated hotword process（Voice Match 未啟用或尚未綁定），觀望 $(date)" >> "$LOG"
+                # 連 isolated process 都沒有：AoHD 在 HDS 綁定前就卡死，
+                # 改殺 GSA 的 VIS 進程逼整條重建（見檔頭 2026-08-24）。
+                vis_pid=$(gsa_vis_pid)
+                if [ -n "$vis_pid" ]; then
+                    fixes=$((fixes + 1))
+                    "$KILL_BIN" $vis_pid
+                    echo "try $try: GSA 無 AoHD 連線，殺 VIS 進程重建（kill $(echo ${vis_pid})，第 ${fixes} 次）$(date)" >> "$LOG"
+                    armed_rounds=0
+                else
+                    echo "try $try: GSA 未載入且無 isolated hotword process（Voice Match 未啟用或尚未綁定），觀望 $(date)" >> "$LOG"
+                fi
             fi
         fi
         sleep "$INTERVAL"

@@ -198,11 +198,25 @@ isolated hotword process
 `googlequicksearchbox:trusted_disable_art_image_…:…gsa.hotword…` ↔
 second-stage audio verification) was rebuilt **cleanly and completely**.
 
-Two confirmed failure modes:
+Three confirmed failure modes:
 
 - **Boot wedge**: GSA's first AoHD init can stall in the boot storm
   (measured: ATTACH 21:36:10, no model for 13 minutes, then self-rebuild
   at 21:49:02 and loaded within 100ms). While stalled, Hey Google is dead.
+- **No-connection wedge (2026-08-24, live)**: a harsher boot wedge where the
+  AoHD stalls **before the HDS bind** — soundtrigger shows only
+  ATTACH/GET_MODULE_PROPERTIES (14:09:57), the isolated process never
+  appears, `dumpsys voiceinteraction` says `No Hotword detection
+  connection`, GSA's own VIS dump says `Sandboxed Detector(s): No detector`.
+  It did NOT self-heal in 4.5 hours. Enrollment, eligibility
+  (`searchBoxEligible=true`, `googleOverlayActive=true`) and default-VIS
+  binding were all intact — purely a wedged init, and there is no isolated
+  process to kill. Recovery: kill GSA's **VIS process**
+  (`GsaVoiceInteractionService`, `processName` resolved from the
+  voiceinteraction dump, currently `:interactor`); system_server rebinds the
+  VIS → GSA `onReady` re-creates the AoHD (live-verified 2026-08-24
+  18:57:05 kill → 18:57:11 DETACH+re-ATTACH → model loaded 137ms later;
+  XiaoAI's ACTIVE model untouched).
 - **Stale chain after audioserver kill/crash**: a disorderly HAL teardown
   rebuilds only the middleware sessions; the GSA-side chain survives in a
   half-old state — DSP keeps detecting (middleware logs `RECOGNITION`
@@ -226,8 +240,13 @@ re-delivers XiaoAI's BootupReceiver until armed (its model is in
 `text: X Google` or vendorUuid `7038ddc8-30f2`; only the trailing
 active-model listing carries `text:`, detached session logs don't). If GSA
 hasn't loaded within `DUALWAKE_GSA_GRACE` (4) rounds, kill the isolated
-hotword process — at most `DUALWAKE_GSA_MAX_FIXES` (2) times. If no such
-process exists (Voice Match off / not bound yet), just keep watching.
+hotword process; if that process doesn't even exist (no-connection wedge),
+kill GSA's VIS process instead — but only when the voiceinteraction dump
+shows GSA **is** the default VIS (`processName=com.google.android.
+googlequicksearchbox:…`) **and** a keyphrase enrollment exists
+(`7038ddc8-30f2`); otherwise Voice Match is genuinely off / another
+assistant is default, and it just keeps watching. Both kill types share
+the `DUALWAKE_GSA_MAX_FIXES` (2) budget.
 
 The BootupReceiver re-delivery (`am broadcast` — on this build just a shim
 over `cmd activity`, so the failure is the native `cmd: Failure calling
