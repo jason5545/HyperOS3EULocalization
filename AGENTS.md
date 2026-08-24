@@ -12,7 +12,8 @@ Magisk/KernelSU module: HyperOS 3 EU localization — XiaoAI voice stack, Taplus
 - `zygisk-src/` — Zygisk module (`main.cpp` = Taplus INTL flip + sensitive-process
   policy, `dualwake.cpp` = dual wake, `homefeed.cpp` = MiuiHome hooks: Google-feed
   prop, minus-screen reroute, widget-picker reroute, `art_resolver.cpp` = ART
-  symbol resolver)
+  symbol resolver, `obfstr.h` + `gen_obf_strings.py` = build-time XOR string
+  encoding)
 - `zygisk-src/test/` — host-side mock test (no device needed); `test/hooker/` —
   JVM regression test for the `jrc.homefeed` hookers (hand-rolled Android stubs
   + fake hook-target classes with the same shapes as the pinned CN build)
@@ -61,6 +62,24 @@ cp zygisk-src/vendor/dobby/build/libdobby.a zygisk-src/vendor/dobby/lib/
 `.gnu_debugdata` string still visible in `strings` output is
 `art_resolver.cpp`'s own section-name constant, not a leftover section.)
 
+Two more stealth layers in the same vein:
+
+- All logging is compiled out of the release `.so`: every `LOGI`/`LOGW` in
+  `main.cpp`/`dualwake.cpp`/`homefeed.cpp` sits behind `TAPLUS_DEBUG_LOG`
+  (the mock test defines it, so log assertions keep working there). The
+  on-device debug flag file therefore has no effect in release builds.
+- Functional strings (module paths, sensitive/financial package names, hook
+  target class names) never appear as plaintext in any translation unit:
+  `gen_obf_strings.py` XOR-encodes them into `gen/obf_strings.h`, invoked by
+  both `build_zygisk.sh` and `test/run_test.sh`; native code decodes to a
+  stack buffer and wipes it (`obfstr.h`). The generated arrays are
+  `const volatile` — without it `-O2` constant-folds the XOR back into a
+  plaintext constant pool in `.rodata` (an earlier constexpr-constructor
+  attempt failed the same way: clang still emitted the literal pieces).
+  Residual readable strings are the JNI/dlsym constants in
+  `dualwake.cpp`/`homefeed.cpp` and the embedded hooker dex, which only load
+  inside the trusted voice-trigger/launcher processes.
+
 ## Zygisk module invariants (do not regress)
 
 - Sensitive processes — `com.google.android.gms` (+`:…`/`.…` children, incl.
@@ -77,9 +96,11 @@ cp zygisk-src/vendor/dobby/build/libdobby.a zygisk-src/vendor/dobby/lib/
   difference); actively unmounting would create the very evidence they check.
   Umount policy belongs to the KSU/susfs layer, not this module. Never let the
   exclusion list or a flip reach them.
-- Logging is off by default everywhere; the debug flag file
+- Logging is compiled out of release builds entirely (`TAPLUS_DEBUG_LOG`);
+  the debug flag file
   `/data/adb/modules/HyperOS3EUXiaoAiPortalMiPay/debug` is only ever read in
-  non-sensitive processes (still zygote-privileged there, so no app-side trace).
+  non-sensitive, non-financial processes (still zygote-privileged there, so
+  no app-side trace) and only has an effect in debug-log builds.
 - `com.miui.voiceassist:voice_trigger` / `com.miui.voicetrigger*` must never be
   dlclosed — the dual-wake workers live in the module. The exclusion list must
   not override this.

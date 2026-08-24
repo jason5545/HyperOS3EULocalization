@@ -15,7 +15,10 @@
 // - 所有 JNI 呼叫檢查例外並 ExceptionClear，絕不讓例外逸出到 app
 // - 類/欄位不存在（非對應 ThemeManager 版本）時靜默跳過
 // - 不修改任何 prop、不碰 /system*
-// - 預設無任何 logcat 輸出；敏感進程連除錯旗標都不讀，永遠靜默
+// - 預設無任何 logcat 輸出：release 版連 log 字串都在編譯期移除
+//   （-DTAPLUS_DEBUG_LOG 才保留）；敏感／金融進程連除錯旗標都不讀
+// - 路徑、package 名、hook 目標類名等常數編譯期 XOR 編碼（obfstr.h），
+//   只在使用當下解到 stack、用完抹除，不讓明文長駐可讀記憶體
 // - Wallet / Play Store / GMS（含 .unstable，DroidGuard 所在）進程：
 //   最先處理，立即 force denylist unmount + dlclose，不做任何修改
 // - 金融／支付 app（台灣主要銀行前綴 + 街口／支付寶等）：同樣第一優先、
@@ -36,25 +39,31 @@
 
 #include "dualwake.h"
 #include "homefeed.h"
+#include "obfstr.h"
+#include "gen/obf_strings.h"
 #include "zygisk.hpp"
 
+// log 字串在 release 版於編譯期整個移除（連 .rodata 都不留）——模組 .so
+// 會在未排除 app 的 maps 裡被宿主直接讀取。需要 log 時以 -DTAPLUS_DEBUG_LOG
+// 編譯（host mock test 即是），除錯旗標
+// /data/adb/modules/HyperOS3EUXiaoAiPortalMiPay/debug 仍負責 runtime 開關，
+// 且只對非敏感、非金融進程生效（敏感／金融進程永不讀檔、永不輸出）。
+#ifdef TAPLUS_DEBUG_LOG
 #define LOG_TAG "TaplusIntlFix"
-// 預設完全靜默：logcat 不該留下任何模組足跡。
-// 除錯時建立空檔 /data/adb/modules/HyperOS3EUXiaoAiPortalMiPay/debug 才輸出，
-// 且只對非敏感進程生效（敏感進程永不讀檔、永不輸出）。
 #define LOGI(...) do { if (g_debug) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__); } while (0)
 #define LOGW(...) do { if (g_debug) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__); } while (0)
+#else
+#define LOGI(...) do {} while (0)
+#define LOGW(...) do {} while (0)
+#endif
 
 namespace {
 
-// 可選排除清單：一行一個 package name（nice_name），# 開頭為註解
-constexpr const char *kExcludeFile =
-        "/data/adb/modules/HyperOS3EUXiaoAiPortalMiPay/excluded_packages.txt";
-
+// 可選排除清單：一行一個 package name（nice_name），# 開頭為註解。
 // 除錯旗標：存在即開啟 log。僅在非敏感進程的 preAppSpecialize 讀取一次
 // （當下仍是 zygote 權限，讀 /data/adb 不會留下 app 側的存取痕跡）。
-constexpr const char *kDebugFile =
-        "/data/adb/modules/HyperOS3EUXiaoAiPortalMiPay/debug";
+// 兩條路徑常數都由 gen_obf_strings.py 編碼（gen/obf_strings.h），用時才
+// 解到 stack、用完抹除（見 obfstr.h）。
 static bool g_debug = false;
 
 static bool clearException(JNIEnv *env) {
@@ -158,12 +167,16 @@ static void *themeRegionWorker(void *opaque) {
         if (class_loader && load_class) {
             // 10.8.0.0: basemodule.utils.ld6；10.8.7.6 起類名改回 DeviceUtils，
             // 區域快取欄位都叫 ld6。依序嘗試，命中任一即算成功。
+            char device_utils[kObfDeviceUtilsLen + 1],
+                 ld6_class[kObfLd6ClassLen + 1];
+            obf::decodeStr(kObfDeviceUtils, device_utils);
+            obf::decodeStr(kObfLd6Class, ld6_class);
             const bool retrofit_region = setStaticRegionField(
-                    env, class_loader, load_class,
-                    "com.android.thememanager.basemodule.utils.DeviceUtils", "ld6") ||
+                    env, class_loader, load_class, device_utils, "ld6") ||
                 setStaticRegionField(
-                    env, class_loader, load_class,
-                    "com.android.thememanager.basemodule.utils.ld6", "ld6");
+                    env, class_loader, load_class, ld6_class, "ld6");
+            obf::secureClear(device_utils);
+            obf::secureClear(ld6_class);
             applied = retrofit_region;
             if (applied) {
                 LOGI("ThemeManager API region cache -> CN");
@@ -225,17 +238,41 @@ public:
         }
 
         // 到這裡已確定不是敏感進程；仍是 zygote 權限，安全地讀一次除錯旗標。
-        g_debug = access(kDebugFile, F_OK) == 0;
+        {
+            char debug_file[kObfDebugFileLen + 1];
+            obf::decodeStr(kObfDebugFile, debug_file);
+            g_debug = access(debug_file, F_OK) == 0;
+            obf::secureClear(debug_file);
+        }
 
-        theme_manager_ = strcmp(nice, "com.android.thememanager") == 0;
-        // 雙喚醒目標進程：精確辨識，絕不影響其他 app。
-        core_alive_ = strcmp(nice, "com.miui.voiceassist:voice_trigger") == 0;
-        voice_trigger_ = strcmp(nice, "com.miui.voicetrigger") == 0 ||
-                         strncmp(nice, "com.miui.voicetrigger:",
-                                 strlen("com.miui.voicetrigger:")) == 0;
-        // 桌面進程：CN 版桌面的 Google 負一屏由 homefeed worker 負責，
-        // 模組必須常駐，且絕不翻轉 IS_INTERNATIONAL_BUILD（見 postAppSpecialize）。
-        miui_home_ = matchesPackageProcess(nice, "com.miui.home");
+        {
+            char theme_manager[kObfThemeManagerLen + 1],
+                 core_alive[kObfCoreAliveLen + 1],
+                 voice_trigger[kObfVoiceTriggerLen + 1],
+                 voice_trigger_pfx[kObfVoiceTriggerPfxLen + 1],
+                 miui_home[kObfMiuiHomeLen + 1];
+            obf::decodeStr(kObfThemeManager, theme_manager);
+            obf::decodeStr(kObfCoreAlive, core_alive);
+            obf::decodeStr(kObfVoiceTrigger, voice_trigger);
+            obf::decodeStr(kObfVoiceTriggerPfx, voice_trigger_pfx);
+            obf::decodeStr(kObfMiuiHome, miui_home);
+
+            theme_manager_ = strcmp(nice, theme_manager) == 0;
+            // 雙喚醒目標進程：精確辨識，絕不影響其他 app。
+            core_alive_ = strcmp(nice, core_alive) == 0;
+            voice_trigger_ = strcmp(nice, voice_trigger) == 0 ||
+                             strncmp(nice, voice_trigger_pfx,
+                                     strlen(voice_trigger_pfx)) == 0;
+            // 桌面進程：CN 版桌面的 Google 負一屏由 homefeed worker 負責，
+            // 模組必須常駐，且絕不翻轉 IS_INTERNATIONAL_BUILD（見 postAppSpecialize）。
+            miui_home_ = matchesPackageProcess(nice, miui_home);
+
+            obf::secureClear(theme_manager);
+            obf::secureClear(core_alive);
+            obf::secureClear(voice_trigger);
+            obf::secureClear(voice_trigger_pfx);
+            obf::secureClear(miui_home);
+        }
         skip_ = isExcluded(nice);
         if (core_alive_ || voice_trigger_ || miui_home_) {
             // 雙喚醒 worker 與桌面 prop hook 都需要模組常駐；即使排除清單
@@ -292,47 +329,62 @@ private:
         // gms 除了主進程與 :子進程，還有用「.」命名的獨立 process，
         // 最重要的是 com.google.android.gms.unstable（DroidGuard /
         // Play Integrity 實際執行處）；三者都必須涵蓋。
-        constexpr const char *kGms = "com.google.android.gms";
-        const size_t gms_length = strlen(kGms);
-        if (strncmp(nice_name, kGms, gms_length) == 0) {
+        char gms[kObfGmsLen + 1], wallet[kObfWalletLen + 1],
+             vending[kObfVendingLen + 1];
+        obf::decodeStr(kObfGms, gms);
+        obf::decodeStr(kObfWallet, wallet);
+        obf::decodeStr(kObfVending, vending);
+
+        const size_t gms_length = strlen(gms);
+        bool sensitive = false;
+        if (strncmp(nice_name, gms, gms_length) == 0) {
             const char tail = nice_name[gms_length];
-            if (tail == '\0' || tail == ':' || tail == '.') return true;
+            if (tail == '\0' || tail == ':' || tail == '.') sensitive = true;
         }
-        return matchesPackageProcess(nice_name,
-                                     "com.google.android.apps.walletnfcrel") ||
-               matchesPackageProcess(nice_name, "com.android.vending");
+        if (!sensitive) {
+            sensitive = matchesPackageProcess(nice_name, wallet) ||
+                        matchesPackageProcess(nice_name, vending);
+        }
+        obf::secureClear(gms);
+        obf::secureClear(wallet);
+        obf::secureClear(vending);
+        return sensitive;
     }
 
     static bool isFinancialProcess(const char *nice_name) {
-        // 台灣主要銀行／支付 app 前綴。來源：PrivSec-dev 銀行相容清單 Taiwan 段
-        // + 實機 pm list packages 核對（2026-08，myron）。前綴以「.」結尾，
-        // 只會命中該機構自己的 package 命名空間（含其 :child 子進程），
-        // 不會誤傷其他 app；誤傷的代價也只是該 app 失去 Taplus 翻轉。
-        constexpr const char *kFinancialPrefixes[] = {
-                "com.cathaybk.",       // 國泰世華 CUBE（mymobibank.android）
-                "com.cathaysec.",      // 國泰證券
-                "com.chb.",            // 彰化銀行（mobile / mobile.pmb）
-                "com.chinatrust.",     // 中國信託 Home Bank
-                "com.esunbank.",       // 玉山銀行 / 玉山 Wallet
-                "tw.com.taishinbank.", // 台新（mobile / ccapp / richart）
-                "tw.com.megabank.",    // 兆豐銀行
-                "com.sinopac.",        // 永豐（大戶投等）
-                "com.nextbank.",       // 將來銀行
-                "com.ipass.",          // 一卡通 iPASS MONEY
-                "tw.gov.post.",        // 中華郵政
-                "com.jkos.",           // 街口支付
-        };
-        for (const char *prefix : kFinancialPrefixes) {
-            if (strncmp(nice_name, prefix, strlen(prefix)) == 0) return true;
+        // 台灣主要銀行／支付 app 清單（一行一筆，見 gen_obf_strings.py）。
+        // 來源：PrivSec-dev 銀行相容清單 Taiwan 段 + 實機 pm list packages
+        // 核對（2026-08，myron）。以「.」結尾的視為前綴，只命中該機構自己的
+        // package 命名空間（含其 :child 子進程）；結尾非「.」的視為完整
+        // package，邊界比對同 matchesPackageProcess。誤傷的代價也只是
+        // 該 app 失去 Taplus 翻轉。
+        char list[kObfFinancialListLen + 1];
+        obf::decodeStr(kObfFinancialList, list);
+        bool hit = false;
+        const char *p = list;
+        while (!hit && *p) {
+            const char *nl = strchr(p, '\n');
+            const size_t len = nl ? (size_t)(nl - p) : strlen(p);
+            if (len > 0) {
+                const bool prefix = p[len - 1] == '.';
+                hit = prefix
+                        ? strncmp(nice_name, p, len) == 0
+                        : strncmp(nice_name, p, len) == 0 &&
+                          (nice_name[len] == '\0' || nice_name[len] == ':' ||
+                           nice_name[len] == '.');
+            }
+            if (!nl) break;
+            p = nl + 1;
         }
-        return matchesPackageProcess(nice_name,
-                                     "com.eg.android.AlipayGphone") ||  // 支付寶
-               matchesPackageProcess(nice_name,
-                                     "com.mitake.android.epost");       // e動郵局
+        obf::secureClear(list);
+        return hit;
     }
 
     static bool isExcluded(const char *nice_name) {
-        FILE *f = fopen(kExcludeFile, "r");
+        char exclude_file[kObfExcludeFileLen + 1];
+        obf::decodeStr(kObfExcludeFile, exclude_file);
+        FILE *f = fopen(exclude_file, "r");
+        obf::secureClear(exclude_file);
         if (!f) return false;  // 無清單檔：全部翻轉
         char line[256];
         bool hit = false;
@@ -365,13 +417,21 @@ private:
     void flipInternational() {
         JNIEnv *env = env_;
 
-        jclass cls = env->FindClass("miui/os/Build");  // BOOTCLASSPATH 類，可直接解析
+        char build_class[kObfBuildClassLen + 1],
+             intl_field[kObfIntlFieldLen + 1];
+        obf::decodeStr(kObfBuildClass, build_class);
+        obf::decodeStr(kObfIntlField, intl_field);
+
+        jclass cls = env->FindClass(build_class);  // BOOTCLASSPATH 類，可直接解析
+        obf::secureClear(build_class);
         if (!cls) {
             clearException(env);  // 非 MIUI：安全跳過
+            obf::secureClear(intl_field);
             return;
         }
 
-        jfieldID fid = env->GetStaticFieldID(cls, "IS_INTERNATIONAL_BUILD", "Z");
+        jfieldID fid = env->GetStaticFieldID(cls, intl_field, "Z");
+        obf::secureClear(intl_field);
         if (!fid) {
             clearException(env);
             env->DeleteLocalRef(cls);

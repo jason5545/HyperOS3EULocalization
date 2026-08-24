@@ -36,6 +36,9 @@ javac -source 8 -target 8 -bootclasspath "$ANDROID_JAR" \
 
 xxd -i -n hooker_dex "$BUILD_DIR/dex/classes.dex" > "$GEN_DIR/hooker_dex.h"
 
+# --- 1.5 產生編碼字串表（明文只存在 gen_obf_strings.py；.so 不含明文常數） ---
+python3 "$ROOT_DIR/zygisk-src/gen_obf_strings.py"
+
 # --- 2. 編譯 Zygisk native library ---
 "$NDK_BUILD" -B \
     NDK_PROJECT_PATH="$ROOT_DIR/zygisk-src" \

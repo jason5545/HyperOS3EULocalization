@@ -1,6 +1,6 @@
 id=HyperOS3EUXiaoAiPortalMiPay
 name=HyperOS 3 EU 小愛・語音喚醒・AI 通話・傳送門・智慧卡
-version=v1.0.25
-versionCode=125
+version=v1.0.26
+versionCode=126
 author=Jason（基於 LSHFGJ 版本精簡）
 description=恢復小愛、語音喚醒、語音引擎、AI 通話、傳送門、智慧卡支付鏈路與國行媒體，不安裝小米錢包；內建 Taplus 修復與指定 App 語系。v1.0.20 起內建國行系統桌面（zygisk 保留 Google 負一屏）。

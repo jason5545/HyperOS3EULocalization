@@ -16,17 +16,25 @@
 #include "art_resolver.h"
 #include "dobby.h"
 #include "gen/hooker_dex.h"
+#include "gen/obf_strings.h"
 #include "lsplant.hpp"
+#include "obfstr.h"
 
+// 比照 main.cpp：log 字串在 release 版編譯期移除（-DTAPLUS_DEBUG_LOG 才保留）。
+#ifdef TAPLUS_DEBUG_LOG
 #define LOG_TAG "DualWake"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
+#else
+#define LOGI(...) do {} while (0)
+#define LOGW(...) do {} while (0)
+#endif
 
 namespace {
 
 // 模組 id（module.prop）決定的安裝路徑；liblsplant.so 由 build.sh 打包進這裡。
-constexpr const char *kLsplantPath =
-        "/data/adb/modules/HyperOS3EUXiaoAiPortalMiPay/zygisk/liblsplant.so";
+// 路徑由 gen_obf_strings.py 編碼（gen/obf_strings.h），用時解到 stack、
+// 用完抹除（見 obfstr.h）。
 
 // dlsym 用的 v2 ABI 符號（與 vendor/lsplant 內的 lsplant.hpp 宣告對應）。
 using LsplantInitFn = bool (*)(JNIEnv *, const lsplant::InitInfo &);
@@ -391,11 +399,15 @@ void *voiceTriggerWorker(void *opaque) {
 }  // namespace
 
 void dualwakePreloadLsplant() {
-    FILE *f = fopen(kLsplantPath, "rb");
+    char lsplant_path[kObfLsplantPathLen + 1];
+    obf::decodeStr(kObfLsplantPath, lsplant_path);
+    FILE *f = fopen(lsplant_path, "rb");
     if (!f) {
-        LOGW("preload: cannot open %s: %s", kLsplantPath, strerror(errno));
+        LOGW("preload: cannot open %s: %s", lsplant_path, strerror(errno));
+        obf::secureClear(lsplant_path);
         return;
     }
+    obf::secureClear(lsplant_path);
     fseek(f, 0, SEEK_END);
     const long size = ftell(f);
     fseek(f, 0, SEEK_SET);
