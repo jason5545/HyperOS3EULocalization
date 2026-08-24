@@ -18,6 +18,11 @@
 // - 預設無任何 logcat 輸出；敏感進程連除錯旗標都不讀，永遠靜默
 // - Wallet / Play Store / GMS（含 .unstable，DroidGuard 所在）進程：
 //   最先處理，立即 force denylist unmount + dlclose，不做任何修改
+// - 金融／支付 app（台灣主要銀行前綴 + 街口／支付寶等）：同樣第一優先、
+//   不讀任何檔、不輸出 log、永不翻轉、立即 dlclose——但「不」force denylist
+//   unmount。這類 app 的 RASP 偵測的正是「KSU 對本 app 設定 per-app umount」
+//   這個狀態本身（mount namespace 差異），主動 unmount 反而製造它要抓的
+//   證據；umount 策略統一交給 KSU 全域（susfs）層，本模組只負責從該進程消失
 // - com.miui.home 桌面：永不翻轉 IS_INTERNATIONAL_BUILD（CN 版桌面的
 //   Google 負一屏分支以它為第一道門），也永不 dlclose——homefeed worker
 //   需要在該進程常駐，攔截 ro.com.miui.rsa 的讀取讓 Google Feed 可選
@@ -210,6 +215,14 @@ public:
             env_->ReleaseStringUTFChars(args->nice_name, nice);
             return;
         }
+        // 金融偵測型進程：與敏感進程同樣第一優先——不讀檔、不 log、不翻轉，
+        // 但只 dlclose 自己，不 FORCE_DENYLIST_UNMOUNT（理由見檔頭註解）。
+        if (isFinancialProcess(nice)) {
+            skip_ = true;
+            api_->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
+            env_->ReleaseStringUTFChars(args->nice_name, nice);
+            return;
+        }
 
         // 到這裡已確定不是敏感進程；仍是 zygote 權限，安全地讀一次除錯旗標。
         g_debug = access(kDebugFile, F_OK) == 0;
@@ -288,6 +301,34 @@ private:
         return matchesPackageProcess(nice_name,
                                      "com.google.android.apps.walletnfcrel") ||
                matchesPackageProcess(nice_name, "com.android.vending");
+    }
+
+    static bool isFinancialProcess(const char *nice_name) {
+        // 台灣主要銀行／支付 app 前綴。來源：PrivSec-dev 銀行相容清單 Taiwan 段
+        // + 實機 pm list packages 核對（2026-08，myron）。前綴以「.」結尾，
+        // 只會命中該機構自己的 package 命名空間（含其 :child 子進程），
+        // 不會誤傷其他 app；誤傷的代價也只是該 app 失去 Taplus 翻轉。
+        constexpr const char *kFinancialPrefixes[] = {
+                "com.cathaybk.",       // 國泰世華 CUBE（mymobibank.android）
+                "com.cathaysec.",      // 國泰證券
+                "com.chb.",            // 彰化銀行（mobile / mobile.pmb）
+                "com.chinatrust.",     // 中國信託 Home Bank
+                "com.esunbank.",       // 玉山銀行 / 玉山 Wallet
+                "tw.com.taishinbank.", // 台新（mobile / ccapp / richart）
+                "tw.com.megabank.",    // 兆豐銀行
+                "com.sinopac.",        // 永豐（大戶投等）
+                "com.nextbank.",       // 將來銀行
+                "com.ipass.",          // 一卡通 iPASS MONEY
+                "tw.gov.post.",        // 中華郵政
+                "com.jkos.",           // 街口支付
+        };
+        for (const char *prefix : kFinancialPrefixes) {
+            if (strncmp(nice_name, prefix, strlen(prefix)) == 0) return true;
+        }
+        return matchesPackageProcess(nice_name,
+                                     "com.eg.android.AlipayGphone") ||  // 支付寶
+               matchesPackageProcess(nice_name,
+                                     "com.mitake.android.epost");       // e動郵局
     }
 
     static bool isExcluded(const char *nice_name) {

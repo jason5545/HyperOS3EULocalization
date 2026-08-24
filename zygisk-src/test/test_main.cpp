@@ -192,6 +192,24 @@ static void testSensitiveSterile(const char *nice) {
     CHECK(g_fopen_calls == 0);       // …and never read the exclude list
 }
 
+static void testFinancialSterile(const char *nice) {
+    char label[160];
+    snprintf(label, sizeof(label), "financial %s", nice);
+    g_case = label;
+    resetState();
+    g_access_result = 0;            // even with the debug flag "present"…
+    g_jni.find_class_ok = true;     // …and miui.os.Build available…
+    g_jni.static_bool_value = true;
+    specialize(nice);
+    CHECK(optionsAre({zygisk::DLCLOSE_MODULE_LIBRARY}));  // dlclose only —
+    // NEVER FORCE_DENYLIST_UNMOUNT: these apps' RASP flags the per-app
+    // umount state itself; forcing it would create the evidence they check.
+    CHECK(g_logs.empty());           // …silent
+    CHECK(g_accessed_paths.empty()); // …never touch the debug flag
+    CHECK(g_fopen_calls == 0);       // …never read the exclude list
+    CHECK(g_jni.set_static_bool_calls == 0);  // …never flipped
+}
+
 static void testNonSensitiveNoDebug() {
     g_case = "non-sensitive, no debug flag";
     resetState();
@@ -258,6 +276,20 @@ static void testSensitivePrefixBoundary() {
     resetState();
     specialize("com.google.android.gmsx");  // must NOT match
     CHECK(g_options.empty());
+}
+
+static void testFinancialPrefixBoundary() {
+    g_case = "financial prefix boundary";
+    resetState();
+    specialize("com.cathaybkx.evil");   // must NOT match the bank prefix…
+    CHECK(g_options.empty());
+    CHECK(g_accessed_paths.size() == 1);  // …so it takes the normal path
+                                          // (debug flag probed once)
+
+    resetState();
+    specialize("com.jkosx.app");
+    CHECK(g_options.empty());
+    CHECK(g_accessed_paths.size() == 1);
 }
 
 static void testExclusions() {
@@ -337,8 +369,26 @@ int main() {
     testSensitiveSterile("com.google.android.gms.unstable");
     testSensitiveSterile("com.google.android.gms:ui");
     testSensitiveSterile("com.android.vending");
+    // financial sterile class: dlclose only, no unmount, no flip, no I/O
+    testFinancialSterile("com.cathaybk.mymobibank.android");
+    testFinancialSterile("com.cathaybk.mymobibank.android:push");
+    testFinancialSterile("com.cathaysec.eservice");
+    testFinancialSterile("com.chb.mobile.pmb");
+    testFinancialSterile("com.chinatrust.mobilebank");
+    testFinancialSterile("com.esunbank.ESUNWALLET");
+    testFinancialSterile("tw.com.taishinbank.richart");
+    testFinancialSterile("tw.com.taishinbank.mobile:remote");
+    testFinancialSterile("tw.com.megabank.mobilebank.pre");
+    testFinancialSterile("com.sinopac.ismartstock");
+    testFinancialSterile("com.nextbank.ncbportal");
+    testFinancialSterile("com.ipass.ipassmoney");
+    testFinancialSterile("tw.gov.post.mpost");
+    testFinancialSterile("com.jkos.app");
+    testFinancialSterile("com.eg.android.AlipayGphone");
+    testFinancialSterile("com.mitake.android.epost");
     testNonSensitiveNoDebug();
     testSensitivePrefixBoundary();
+    testFinancialPrefixBoundary();
     testExclusions();
     testVoiceTrigger();
     testNonSensitiveDebugFlip();

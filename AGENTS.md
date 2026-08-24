@@ -39,6 +39,28 @@ sh build.sh                                                    # release zip
 `build.sh` packages whatever `zygisk/arm64-v8a.so` is present — if native
 sources changed, rebuild the .so first, then test, then pack.
 
+Stealth hardening in the native build (the .so stays resident — and readable —
+in every non-excluded app's `/proc/self/maps`): `build_zygisk.sh` compiles the
+hooker dex with `d8 --release` and strips the final `.so`
+(`llvm-strip --strip-all --remove-section=.gnu_debugdata`). The vendored
+`libdobby.a` is built from `vendor/dobby/src` with `-DLOGGING_DISABLE` —
+without it dobby's `ERROR_LOG`/`FATAL` bake the host's absolute `__FILE__`
+paths (incl. the macOS username) into the `.so`. Rebuild it with:
+
+```sh
+cmake -S zygisk-src/vendor/dobby/src -B zygisk-src/vendor/dobby/build \
+    -DCMAKE_TOOLCHAIN_FILE="$HOME/Library/Android/sdk/ndk/<ver>/build/cmake/android.toolchain.cmake" \
+    -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26 \
+    -DCMAKE_BUILD_TYPE=Release -DDOBBY_GENERATE_SHARED=OFF \
+    -DCMAKE_CXX_FLAGS=-DLOGGING_DISABLE
+cmake --build zygisk-src/vendor/dobby/build --target dobby -j8
+cp zygisk-src/vendor/dobby/build/libdobby.a zygisk-src/vendor/dobby/lib/
+```
+
+(Residual `-g` DWARF in the `.a` is removed by the final strip; the
+`.gnu_debugdata` string still visible in `strings` output is
+`art_resolver.cpp`'s own section-name constant, not a leftover section.)
+
 ## Zygisk module invariants (do not regress)
 
 - Sensitive processes — `com.google.android.gms` (+`:…`/`.…` children, incl.
@@ -46,6 +68,15 @@ sources changed, rebuild the .so first, then test, then pack.
   `com.android.vending` — must stay **sterile**: no logcat output, no file I/O,
   no `Build` flips. Only `FORCE_DENYLIST_UNMOUNT` + `DLCLOSE_MODULE_LIBRARY`,
   decided first thing in `preAppSpecialize`.
+- Financial processes — TW bank/payment prefixes hardcoded in
+  `isFinancialProcess` (`main.cpp`; sources: PrivSec-dev Taiwan banking list +
+  on-device `pm list packages`, 2026-08) — same first-priority sterile
+  treatment as sensitive (no logcat, no file I/O, no flips) **except no
+  `FORCE_DENYLIST_UNMOUNT`**, only `DLCLOSE_MODULE_LIBRARY`. These apps' RASP
+  flags the "KSU set umounted per app" state itself (mount-namespace
+  difference); actively unmounting would create the very evidence they check.
+  Umount policy belongs to the KSU/susfs layer, not this module. Never let the
+  exclusion list or a flip reach them.
 - Logging is off by default everywhere; the debug flag file
   `/data/adb/modules/HyperOS3EUXiaoAiPortalMiPay/debug` is only ever read in
   non-sensitive processes (still zygote-privileged there, so no app-side trace).
