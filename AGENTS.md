@@ -5,7 +5,9 @@ Magisk/KernelSU module: HyperOS 3 EU localization — XiaoAI voice stack, Taplus
 
 ## Layout
 
-- `system/product/…` — systemless payload APKs (checked by `build.sh`)
+- `system/product/…` — systemless payload APKs (checked by `build.sh`); APKs
+  bundling native code also carry pre-extracted `lib/arm64/` (see "Systemless
+  payload native libs" below)
 - `system/product/etc/permissions/` — priv-app grant XMLs (defensive; the
   xiaomi.eu 308 base already ships these grants)
 - `payload/` — data-app APKs installed by the on-device service script
@@ -84,6 +86,31 @@ Two more stealth layers in the same vein:
   Residual readable strings are the JNI/dlsym constants in
   `dualwake.cpp`/`homefeed.cpp` and the embedded hooker dex, which only load
   inside the trusted voice-trigger/launcher processes.
+
+## Systemless payload native libs (root cause, 2026-08-26 on myron)
+
+After the 2026-08 factory reset + KSU Next reinstall (base bumped to
+OS3.0.309.0.WPMCNXM), every `com.miui.voiceassist` process crash-looped
+with `UnsatisfiedLinkError: dlopen failed: library "libmmkv.so" not found`.
+The payload APKs ship `extractNativeLibs=true` (or attr absent → default
+true) with **deflate-compressed** `lib/arm64-v8a/*.so`, so they cannot
+load libs from the APK itself — they rely on PackageManager extracting
+them into the prebuilt `<codePath>/lib/arm64/` at scan time. That
+silently worked while the systemless mount was a writable magic-mount
+tmpfs dir; KSU Next's hybrid mount (`/product/app` etc. = lowerdir-only
+overlayfs, `ro`, lowerdir under `/mnt/hm_*`) leaves nowhere to extract,
+so every `System.loadLibrary` fails — MMKV is simply the first lib XiaoAI
+initializes. (Overlayfs lowerdir edits after mount are not reflected in
+the merged view, so there is no live patch — rebuild the zip.)
+
+**Invariant**: every payload APK that bundles `lib/arm64-v8a/*.so` must
+ship the complete set pre-extracted at `<payload>/lib/arm64/` (the
+pattern UPTsmService already used; its dir additionally carries 3 libs
+not present in the APK — keep them). Applies to all 13 payloads incl.
+the `extractNativeLibs=false` ones (MIUIAiasstService / ThemeManager /
+MIUIContentExtension / MiuiHome): a uniform rule beats per-APK manifest
+checks, and the dir is ignored wherever the APK loads libs from itself.
+`build.sh` hard-fails on any bundled `.so` missing from `lib/arm64/`.
 
 ## Zygisk module invariants (do not regress)
 

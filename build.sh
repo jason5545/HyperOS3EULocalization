@@ -76,6 +76,24 @@ for payload in $DATA_APP_PAYLOADS $FILE_PAYLOADS; do
     fi
 done
 
+# KSU Next hybrid mount 是唯讀 overlay，PackageManager 無法在掃描時現場解出
+# APK 內的 native lib（extractNativeLibs=true 的 App 會直接 UnsatisfiedLinkError）。
+# 凡 APK 內含 lib/arm64-v8a/*.so 的 payload，必須附上預解壓的 lib/arm64/。
+for payload in $REQUIRED_PAYLOADS; do
+    PAYLOAD_APK=$(find "$ROOT_DIR/$payload" -maxdepth 1 -type f -name '*.apk')
+    MISSING_LIBS=""
+    for so in $(unzip -Z1 "$PAYLOAD_APK" 'lib/arm64-v8a/*.so' 2>/dev/null | sed 's|.*/||'); do
+        if [ ! -f "$ROOT_DIR/$payload/lib/arm64/$so" ]; then
+            MISSING_LIBS="$MISSING_LIBS $so"
+        fi
+    done
+    if [ -n "$MISSING_LIBS" ]; then
+        echo "$payload 的 APK 內含 native lib 但缺少預解壓檔:$MISSING_LIBS" >&2
+        echo "請以 unzip -j 解出 lib/arm64-v8a/* 到 $payload/lib/arm64/" >&2
+        exit 1
+    fi
+done
+
 for path in $EXCLUDED_PATHS; do
     if [ -e "$ROOT_DIR/$path" ]; then
         echo "發現不應打包的路徑: $path" >&2
