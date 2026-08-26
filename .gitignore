@@ -27,6 +27,7 @@ scripts/*
 !scripts/build_zygisk.sh
 !scripts/test_dualwake_boot.sh
 !scripts/test_mount_scrub.sh
+!scripts/test_aicall_defaulton.sh
 zygisk-src/libs/
 zygisk-src/obj/
 zygisk-src/build/

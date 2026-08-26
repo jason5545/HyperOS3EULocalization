@@ -32,11 +32,10 @@ rm -rf \
 set_perm_recursive "$MODPATH" 0 0 0755 0644
 set_perm "$MODPATH/service.sh" 0 0 0755
 set_perm "$MODPATH/uninstall.sh" 0 0 0755
-set_perm "$MODPATH/action.sh" 0 0 0755
 
 ui_print ""
 ui_print "安裝完成，請重新開機。"
 ui_print "KernelSU 使用者需先啟用可用的 systemless 掛載元模組。"
 ui_print "Taplus 長按修復另需 Zygisk Next 正常啟用。"
 ui_print "語音引擎與國行相簿由開機服務安裝；ThemeManager 仍需要 CorePatch 相容。"
-ui_print "重新開機後可用模組的「執行」按鈕完成 AI 通話首次啟用。"
+ui_print "AI 通話入口於重新開機後預設開啟。"

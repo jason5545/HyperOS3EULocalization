@@ -29,6 +29,10 @@ Magisk/KernelSU module: HyperOS 3 EU localization — XiaoAI voice stack, Taplus
 - `scripts/test_dualwake_boot.sh` — host-side shell test for the watchdog
 - `scripts/test_mount_scrub.sh` — host-side shell test for the scrubber and
   the power-key follow sync
+- `aicall_defaulton.sh` — AI-call entry default-on one-shot worker, started by
+  `service.sh` via the same `/data/local/tmp` pattern (see "AI-call entry gate
+  & default-on" below)
+- `scripts/test_aicall_defaulton.sh` — its host-side shell test
 - `build.sh` — packs `dist/HyperOS3_EU_XiaoAI_Portal_MiPay_<version>.zip`;
   also generates `payload_versions.txt` (aapt2-derived package/versionCode
   manifest driving the `service.sh` registration audit — build artifact,
@@ -44,6 +48,7 @@ sh zygisk-src/test/run_test.sh                                 # regression gate
 sh zygisk-src/test/run_hooker_test.sh                          # hooker JVM gate
 sh scripts/test_dualwake_boot.sh                               # boot watchdog gate
 sh scripts/test_mount_scrub.sh                                 # mount scrub gate
+sh scripts/test_aicall_defaulton.sh                            # AI-call default-on gate
 NDK_BUILD="$HOME/Library/Android/sdk/ndk/<ver>/ndk-build" \
     sh scripts/build_zygisk.sh                                 # native .so
 sh build.sh                                                    # release zip
@@ -437,7 +442,63 @@ round). It only touches the two assistant functions; a deliberate
 round. Host cases 8-13 in `scripts/test_mount_scrub.sh` cover the mapping,
 the no-op/respect/off paths.
 
-## ReSukiSU / susfs migration (root causes, 2026-08-26 on myron)
+## AI-call entry gate & default-on (root cause, 2026-08-26 on myron)
+
+Symptom: after the 2026-08 factory reset the 「AI 通話」 entry vanished from
+both the dialer ⋮ menu and the in-call UI, and flipping the toggle in the
+settings page did nothing.
+
+Gate chain (Contacts.apk `DialerMenuDialog.O1`): the menu item exists only
+when `SystemCompat.i() && A() && p()` all pass —
+
+- `i()` — `resolveActivity({pkg=com.xiaomi.aiasst.service, action=
+  com.xiaomi.aiasst.service.contact.aicalllog_detail}, MATCH_DEFAULT_ONLY)`
+  → resolves to `CallLogDetailActivity`.
+- `p()` — MIUIAiasstService manifest meta-data `support_incallui_place` ≥ 1
+  (it is 8).
+- `A()` — calls `content://com.xiaomi.aiasst.service.aicall.provider` method
+  `GET_AICALL_AVAILABLE`; needs `KEY_STATUS_CODE` ∈ {1,3,4}.
+
+Provider-side status (`AICallProvider.b()`): 6 when `AbstractC0709u.q()`
+fails (privacy / user_cta not accepted — both already true on myron), 2 when
+`e0.a()` fails (`ro.miui.ui.version.code` < 10; myron has 816), otherwise
+`SettingsSp.getInCallCtrlButton(false) ? 1 : 0`. The key is
+`incallctrlbutton` (boolean) in shared_prefs `setting.xml` — **absent by
+default after a reset → status 0 → entry hidden**. That was the whole bug.
+
+Three live-verified pitfalls (all hit first-hand):
+
+- The settings toggle does NOT persist without the overlay permission:
+  `InCallCtrlSettingFragment`'s handler checks `BaseActivity.q0()` (=
+  `Settings.canDrawOverlays`); when false it only pops the permission
+  dialog and returns without writing the pref.
+- **Never `am force-stop com.xiaomi.aiasst.service`**: force-stop marks the
+  package stopped, and `resolveActivity` then filters it out → `i()` fails
+  → entry disappears even with the pref true. Provider attach is NOT
+  affected by the stopped state (contacts still starts the process), which
+  makes the symptom extra confusing (provider answers, menu still hides).
+  To make the app re-read prefs, `kill` the process instead — plain kill
+  does not set the stopped flag.
+- Probing the provider as root/shell (`content call`) is a red herring:
+  the caller check (`getPackagesForUid(0)` → null) returns null. Only uid
+  1000/1001 and `com.android.{server.telecom,incallui,contacts,phone}` /
+  `com.xiaomi.{aiasst.service,phone}` with a matching system signature are
+  served. Judge status from the dialer's own log (`SystemCompat: status
+  code:N` via `Logger.f`, not logcat) or the menu itself.
+
+Fix (v1.0.32): `aicall_defaulton.sh`, a one-shot worker started by
+`service.sh` (same `/data/local/tmp` nohup pattern as dualwake): writes
+`incallctrlbutton=true` only when the key is absent (explicit user on/off is
+respected), using tmp-file → chown/chmod (dir owner, 0660) → `mv` (atomic
+rename; **never `sed -i`** — toybox sed -i creates a new root-owned inode
+the app cannot read); grants appops `SYSTEM_ALERT_WINDOW` only when the mode
+is `default`; kills the app process afterwards if running so it re-reads
+prefs (SharedPreferences never notices external file changes). Host test:
+`scripts/test_aicall_defaulton.sh` (29 checks). The old `action.sh` (a
+shortcut that only opened that settings page) was removed in v1.0.32 —
+default-on made it pointless.
+
+
 
 User migrated from KSU Next to **ReSukiSU (ksud 4.2.0-rc1) + LunarKernel V1.3
 (susfs v2.2.0)**, same OS3.0.309.0.WPMCNXM base. Symptom report: "album still

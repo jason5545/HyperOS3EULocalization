@@ -37,12 +37,13 @@ payload/xiaoai/MIUIXiaoAiSpeechEngine.apk
 "
 
 # 單檔 systemless payload：priv-app 授權 XML（補 CN 有、EU 缺的 grants）、
-# 雙喚醒冷開機保底 worker 與敏感進程 mount 清道夫
+# 雙喚醒冷開機保底 worker、敏感進程 mount 清道夫與 AI 通話入口預設開啟
 # （worker 皆由 service.sh 複製到 /data/local/tmp 執行）
 FILE_PAYLOADS="
 system/product/etc/permissions/privapp-permissions-hyperos3eu.xml
 dualwake_boot.sh
 mount_scrub.sh
+aicall_defaulton.sh
 "
 
 EXCLUDED_PATHS="
@@ -116,11 +117,6 @@ if [ ! -f "$ROOT_DIR/excluded_packages.txt" ]; then
     exit 1
 fi
 
-if [ ! -f "$ROOT_DIR/action.sh" ]; then
-    echo "缺少 AI 通話模組入口: action.sh" >&2
-    exit 1
-fi
-
 # payload_versions.txt：所有 payload APK 的「package versionCode 模組相對路徑」
 # 清單，供 service.sh 做 data-app 期望版本查詢與系統 App 登錄稽核（PM 嚴格
 # 升級保留的自愈，見 AGENTS.md「PM 嚴格升級保留」）。建置產物，不入庫。
@@ -162,7 +158,6 @@ zip -qr "$OUTPUT_PATH" \
     META-INF/com/google/android/updater-script \
     module.prop \
     customize.sh \
-    action.sh \
     service.sh \
     uninstall.sh \
     tools/unity_install.sh \

@@ -235,6 +235,18 @@ done
 [ "$(settings get system global_power_guide)" = "0" ] || \
     settings put system global_power_guide 0
 
+# --- AI 通話入口預設開啟 -----------------------------------------------------
+# 2026-08-26 定因（詳見 AGENTS.md「AI 通話入口 gate 與預設開啟」與
+# aicall_defaulton.sh 檔頭）：撥號盤 ⋮ 選單／通話中按鈕的 AI 通話入口由
+# MIUIAiasstService 的 AICallProvider status 決定，status =
+# shared_prefs 的 incallctrlbutton；恢復原廠後該 key 不存在（入口整個
+# 隱藏），設定頁開關又會在缺懸浮窗權限時只彈框不落盤。一次性 worker
+# 補預設 true＋overlay 權限；已表態（開或關）一律不動。同 dualwake
+# 模式：複製到 /data/local/tmp 執行，跑完即退。
+AICALL_TMP=/data/local/tmp/jrc_aicall_defaulton.sh
+cp "$MODDIR/aicall_defaulton.sh" "$AICALL_TMP"
+AICALL_DEFAULTON_LOG="$MODDIR/aicall_defaulton.log" nohup sh "$AICALL_TMP" >/dev/null 2>&1 &
+
 # --- 雙喚醒冷開機保底 -------------------------------------------------------
 # 1) 冷開機記憶體高峰時，MIUI 可能在 BootupReceiver 結束後數十毫秒內回收
 #    com.miui.voiceassist:voice_trigger，讓 CoreAlive 內部的 bind 來不及執行。
