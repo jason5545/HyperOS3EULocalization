@@ -1,5 +1,6 @@
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
@@ -98,17 +99,33 @@ public final class HookerTestMain {
         PackageManager pm = new PackageManager();
         PackageInfo info = new PackageInfo();
         info.versionCode = 750062529L;
-        pm.packageInfo = info;
-        check(HomeRsaHooker.shouldInstall(new Context(pm, null, "com.miui.home")),
+        pm.archiveInfo = info;
+        Context ctx = new Context(pm, null, "com.miui.home");
+        ctx.appInfo = new ApplicationInfo();
+        ctx.appInfo.sourceDir = "/product/priv-app/MiuiHome/MiuiHome.apk";
+        check(HomeRsaHooker.shouldInstall(ctx),
                 "pinned CN build 750062529 must install");
 
         info.versionCode = 601062515L;
-        check(!HomeRsaHooker.shouldInstall(new Context(pm, null, "com.miui.home")),
+        check(!HomeRsaHooker.shouldInstall(ctx),
                 "EU build must NOT install");
 
-        pm.packageInfo = null;  // getPackageInfo throws NameNotFoundException
-        check(!HomeRsaHooker.shouldInstall(new Context(pm, null, "com.miui.home")),
-                "missing package must not install");
+        // 2026-08-26 ReSukiSU 案例：PM 登錄是 EU 2545（downgrade-keep），
+        // 但執行中的 APK 是 CN 2529——必須對程式碼本體求值、放行 hook。
+        PackageInfo registry = new PackageInfo();
+        registry.versionCode = 750062545L;
+        pm.packageInfo = registry;
+        info.versionCode = 750062529L;
+        check(HomeRsaHooker.shouldInstall(ctx),
+                "stale PM registry must not shadow the running CN apk");
+
+        pm.archiveInfo = null;  // archive 解析失敗（real getPackageArchiveInfo 回 null）
+        check(!HomeRsaHooker.shouldInstall(ctx),
+                "unparseable apk must not install");
+
+        ctx.appInfo = null;
+        check(!HomeRsaHooker.shouldInstall(ctx),
+                "missing ApplicationInfo must not install");
     }
 
     private static boolean pollUntil(java.util.concurrent.Callable<Boolean> cond,

@@ -156,10 +156,14 @@ check_ge() { # check_ge DESC MIN ACTUAL（至少 MIN 次）
     fi
 }
 
-# --- 案例 1：小愛一直未武裝 -------------------------------------------------
+# --- 案例 1：小愛一直未武裝（GSA 已註冊且是預設 VIS）→ 未武裝也盯 GSA --------
+# 2026-08-26 行為變更：此案例原本斷言「未武裝就不碰 GSA」。service.sh 閘門
+# 放寬（voice_trigger_enabled 歸 null 也要跑）後，這種場景正是 Hey Google
+# 唯一的守望者——逾寬限輪起與武裝路徑共用重建鏈與額度（詳見 worker 檔頭
+# 2026-08-26 補述）。
 OUT=$(run_worker 999 999 999 0 2 3 0 1 1)
-check '未武裝:不重建 GSA' 0 "$(printf '%s' "$OUT" | count 'kill ')"
 check '未武裝:每輪重送 BootupReceiver' 3 "$(printf '%s' "$OUT" | count 'am broadcast')"
+check '未武裝:GSA 卡死也修（無 isolated process，殺 VIS 用滿額度）' 2 "$(printf '%s' "$OUT" | count '^kill 2222$')"
 check '未武裝:記錄放棄' 1 "$(printf '%s' "$OUT" | count '放棄')"
 
 # --- 案例 2：雙方模型都在 → 完全不動 -----------------------------------------
@@ -213,11 +217,12 @@ check 'am 失敗:記錄就緒' 1 "$(printf '%s' "$OUT" | count '就緒')"
 check 'am 失敗:不重建' 0 "$(printf '%s' "$OUT" | count 'kill ')"
 
 # --- 案例 10:am 持續失敗 → 每輪試滿 RETRY_MAX 次,不提早崩潰 -------------------
+# （2026-08-26 行為變更同案例 1：小愛未武裝時 GSA 卡死仍照修。）
 OUT=$(run_worker 999 999 999 0 2 3 999 1 1)
 check 'am 全敗:三輪共 9 次嘗試' 9 "$(printf '%s' "$OUT" | count 'am broadcast')"
 check 'am 全敗:記錄九次失敗' 9 "$(printf '%s' "$OUT" | count '次失敗')"
 check 'am 全敗:記錄放棄' 1 "$(printf '%s' "$OUT" | count '放棄')"
-check 'am 全敗:不重建 GSA' 0 "$(printf '%s' "$OUT" | count 'kill ')"
+check 'am 全敗:GSA 卡死仍照修（殺 VIS 兩次）' 2 "$(printf '%s' "$OUT" | count '^kill 2222$')"
 
 # --- 案例 11:無 isolated process 的 AoHD wedge → 殺 VIS 進程,重建成功 --------
 # 2026-08-24 實機：ATTACH 後 HDS 連線從未建立（No Hotword detection
@@ -240,6 +245,27 @@ OUT=$(run_worker 0 999 999 0 2 6 0 0 1)
 check 'GSA 非預設 VIS:不重建' 0 "$(printf '%s' "$OUT" | count 'kill ')"
 check_ge 'GSA 非預設 VIS:記錄觀望' 1 "$(printf '%s' "$OUT" | count '觀望')"
 check 'GSA 非預設 VIS:記錄結束' 1 "$(printf '%s' "$OUT" | count '仍未載入')"
+
+# --- 案例 14:小愛一直未武裝 + GSA 卡住（isolated 在）→ 殺 isolated,重建成功 ---
+OUT=$(run_worker 999 999 0 1 2 8 0 1 1)
+check '未武裝盯 GSA:重建一次' 1 "$(printf '%s' "$OUT" | count '^kill ')"
+check '未武裝盯 GSA:殺的是 isolated hotword pid' 1 "$(printf '%s' "$OUT" | count '^kill 1111$')"
+check '未武裝盯 GSA:不去殺 VIS' 0 "$(printf '%s' "$OUT" | count '^kill 2222$')"
+check '未武裝盯 GSA:每輪仍重送廣播' 8 "$(printf '%s' "$OUT" | count 'am broadcast')"
+check '未武裝盯 GSA:小愛沒醒就記放棄' 1 "$(printf '%s' "$OUT" | count '放棄')"
+
+# --- 案例 15:小愛一直未武裝 + AoHD wedge（無 isolated）→ 殺 VIS,重建成功 ------
+OUT=$(run_worker 999 999 999 1 2 8 0 1 1)
+check '未武裝盯 GSA(VIS):重建一次' 1 "$(printf '%s' "$OUT" | count '^kill ')"
+check '未武裝盯 GSA(VIS):殺的是 VIS pid' 1 "$(printf '%s' "$OUT" | count '^kill 2222$')"
+check '未武裝盯 GSA(VIS):記錄 VIS 重建' 1 "$(printf '%s' "$OUT" | count '殺 VIS 進程重建')"
+check '未武裝盯 GSA(VIS):記錄放棄' 1 "$(printf '%s' "$OUT" | count '放棄')"
+
+# --- 案例 16:小愛一直未武裝 + Voice Match 沒開 → 只觀望不動手 -----------------
+OUT=$(run_worker 999 999 999 0 2 6 0 1 0)
+check '未武裝未註冊:不重建' 0 "$(printf '%s' "$OUT" | count 'kill ')"
+check_ge '未武裝未註冊:記錄觀望' 1 "$(printf '%s' "$OUT" | count '觀望')"
+check '未武裝未註冊:記錄放棄' 1 "$(printf '%s' "$OUT" | count '放棄')"
 
 echo
 echo "passed: $PASS, failed: $FAIL"

@@ -5,12 +5,22 @@ SYSTEM_VERSION="$(getprop ro.system.build.version.incremental)"
 SYSTEM_VERSION=${SYSTEM_VERSION:-unknown}
 VERSION_DIR="$MODDIR/system/etc/localization/SystemVersion"
 
+ROM_CHANGED=0
 if [ ! -f "$VERSION_DIR/$SYSTEM_VERSION" ]; then
+    ROM_CHANGED=1
     rm -rf /data/system/package_cache/*
     rm -rf "$VERSION_DIR"
     mkdir -p "$VERSION_DIR"
     touch "$VERSION_DIR/$SYSTEM_VERSION"
 fi
+
+# 模組所有 payload APK 的 package/versionCode/路徑清單（build.sh 以 aapt2
+# 生成）：data-app 期望版本、systemless 登錄稽核都以此為唯一真相來源。
+PAYLOAD_VERSIONS="$MODDIR/payload_versions.txt"
+payload_vc() {
+    [ -f "$PAYLOAD_VERSIONS" ] || return 1
+    sed -n "s/^$1 \([0-9][0-9]*\) .*/\1/p" "$PAYLOAD_VERSIONS" | head -n 1
+}
 
 # 等系統服務與 user 0 ready，再套用每個 App 的語系。
 # 小愛、語音喚醒、語音引擎與 AI 通話使用簡中；其餘新增 App 使用繁中（台灣）。
@@ -40,10 +50,14 @@ installed_version_code() {
 ensure_data_app() {
     PACKAGE_NAME="$1"
     RELATIVE_APK="$2"
-    EXPECTED_VERSION="$3"
+    EXPECTED_VERSION="$(payload_vc "$PACKAGE_NAME")"
     APK_PATH="$DATA_PAYLOAD_DIR/$RELATIVE_APK"
     APK_NAME="${RELATIVE_APK##*/}"
 
+    if [ -z "$EXPECTED_VERSION" ]; then
+        echo "NO-MANIFEST: $PACKAGE_NAME（payload_versions.txt 缺條目，跳過）" >> "$DATA_INSTALL_LOG"
+        return
+    fi
     if [ "$(installed_version_code "$PACKAGE_NAME")" = "$EXPECTED_VERSION" ]; then
         return
     fi
@@ -55,30 +69,88 @@ ensure_data_app() {
     mkdir -p "$DATA_INSTALL_TMP"
     TMP_APK="$DATA_INSTALL_TMP/$APK_NAME"
     cp "$APK_PATH" "$TMP_APK"
-    if pm install -r -d -g "$TMP_APK" >> "$DATA_INSTALL_LOG" 2>&1; then
-        echo "SUCCESS: $PACKAGE_NAME -> $EXPECTED_VERSION" >> "$DATA_INSTALL_LOG"
-    else
-        echo "FAILED: $PACKAGE_NAME -> $EXPECTED_VERSION" >> "$DATA_INSTALL_LOG"
-    fi
+    # 開機風暴裡 AMS 可能整批拒絕 binder transaction（2026-08-26 實測
+    # "cmd: Failure calling service package: Failed transaction (2147483646)"
+    # 讓 Gallery 整輪沒裝到）。同雙喚醒的 redeliver 模式：同輪短退避再試，
+    # 成功與否以輸出含 Success 為準。
+    INSTALL_ATTEMPT=0
+    while [ "$INSTALL_ATTEMPT" -lt 3 ]; do
+        INSTALL_ATTEMPT=$((INSTALL_ATTEMPT + 1))
+        INSTALL_OUT=$(pm install -r -d -g "$TMP_APK" 2>&1)
+        echo "$INSTALL_OUT" >> "$DATA_INSTALL_LOG"
+        case "$INSTALL_OUT" in
+        *Success*)
+            echo "SUCCESS: $PACKAGE_NAME -> $EXPECTED_VERSION" >> "$DATA_INSTALL_LOG"
+            break
+            ;;
+        esac
+        echo "RETRY ${INSTALL_ATTEMPT}: $PACKAGE_NAME（$(echo "$INSTALL_OUT" | tail -n 1)）" >> "$DATA_INSTALL_LOG"
+        [ "$INSTALL_ATTEMPT" -lt 3 ] && sleep 2
+    done
+    case "$INSTALL_OUT" in
+    *Success*) ;;
+    *) echo "FAILED: $PACKAGE_NAME -> $EXPECTED_VERSION" >> "$DATA_INSTALL_LOG" ;;
+    esac
     rm -f "$TMP_APK"
 }
 
 echo "=== data app ensure: $(date) ===" > "$DATA_INSTALL_LOG"
-ensure_data_app com.xiaomi.mibrain.speech xiaoai/MIUIXiaoAiSpeechEngine.apk 60
-ensure_data_app com.miui.gallery cn-media/MiuiGallery.apk 5000507
+ensure_data_app com.xiaomi.mibrain.speech xiaoai/MIUIXiaoAiSpeechEngine.apk
+ensure_data_app com.miui.gallery cn-media/MiuiGallery.apk
 
-# 曾走 /data/app 的套件（SoundRecorder、MediaEditor）在同 versionCode 下會被
-# data 安裝遮蔽，這裡卸掉殘留的 data 安裝，讓 systemless 版本生效。
-# 錄音檔與相片都在 MediaStore，卸掉 data 安裝不影響既有檔案。
-for MIGRATE_PKG in com.android.soundrecorder com.miui.mediaeditor; do
-    case "$(pm path "$MIGRATE_PKG" 2>/dev/null | head -n 1)" in
+# --- PM 系統 App 登錄稽核與 data shadow 自愈 ---------------------------------
+# 2026-08-26 ReSukiSU 遷移實測定因（詳見 AGENTS.md「PM 嚴格升級保留」）：
+# PackageManager 只在「掃到的 versionCode 嚴格大於已登錄值」時才重寫系統
+# App 登錄。root 方案遷移／掛載失敗的開機會讓 EU 底包（vc 較高或同號異
+# build）卡進登錄；之後掛回 CN payload，PM 永久保留 EU manifest＋CN 程式碼
+# → SoundRecorder/MediaEditor 的 installProvider 整批 ClassNotFound 直接 FC，
+# MiuiHome 則是登錄 2545／實跑 2529。packages.xml 已是 ABX binary，shell
+# 無法手術；本段每輪開機稽核並在 vc 允許時（CN ≥ 已登錄值）以 data shadow
+# 立即接手 CN manifest，其餘只記警告（待 payload 升版／GetApps CN 更新／
+# OTA 全量重掃自然收斂）。
+if [ -f "$PAYLOAD_VERSIONS" ]; then
+    # ROM 變更（mIsUpgrade 全量重掃）：先卸掉殘留 data shadow，讓重掃後的
+    # systemless 登錄接手；shadow 只在登錄卡 EU 期間有存在價值。
+    if [ "$ROM_CHANGED" = "1" ]; then
+        for SHADOW_PKG in com.android.soundrecorder com.miui.mediaeditor; do
+            case "$(pm path "$SHADOW_PKG" 2>/dev/null | head -n 1)" in
+            package:/data/app/*)
+                if pm uninstall "$SHADOW_PKG" >> "$DATA_INSTALL_LOG" 2>&1; then
+                    echo "SHADOW-CLEAR(ROM change): $SHADOW_PKG" >> "$DATA_INSTALL_LOG"
+                fi
+                ;;
+            esac
+        done
+    fi
+    while read -r SPKG SVC SPATH; do
+        case "$SPKG" in ''|\#*) continue ;; esac
+        case "$SPATH" in payload/*) continue ;; esac  # data payload 由上方 ensure 處理
+        SREG=$(installed_version_code "$SPKG")
+        [ "$SREG" = "$SVC" ] && continue               # 登錄正確（含 shadow 在役）
+        [ -z "$SREG" ] && continue                     # 未登錄：PM 掃到自然會登錄
+        case "$(pm path "$SPKG" 2>/dev/null | head -n 1)" in
         package:/data/app/*)
-            if pm uninstall "$MIGRATE_PKG" >> "$DATA_INSTALL_LOG" 2>&1; then
-                echo "MIGRATED: $MIGRATE_PKG data -> module" >> "$DATA_INSTALL_LOG"
+            echo "AUDIT: $SPKG data shadow 在役但版本不符（registered=$SREG shipped=$SVC）" >> "$DATA_INSTALL_LOG"
+            ;;
+        *)
+            if [ "$SVC" -ge "$SREG" ] 2>/dev/null && [ "${SPATH#*priv-app}" = "$SPATH" ]; then
+                # 非 priv-app 且 CN vc ≥ 卡住的 EU 登錄：裝 data shadow，
+                # CN manifest 立即生效（priv-app 走 data 會丟 privileged
+                # grants，只能記警告）。
+                SHADOW_NAME="${SPATH##*/}"
+                mkdir -p "$DATA_INSTALL_TMP"
+                cp "$MODDIR/$SPATH" "$DATA_INSTALL_TMP/$SHADOW_NAME"
+                if pm install -r -d -g "$DATA_INSTALL_TMP/$SHADOW_NAME" >> "$DATA_INSTALL_LOG" 2>&1; then
+                    echo "SHADOWED: $SPKG $SREG -> $SVC（systemless 登錄卡住，data shadow 接手）" >> "$DATA_INSTALL_LOG"
+                fi
+                rm -f "$DATA_INSTALL_TMP/$SHADOW_NAME"
+            else
+                echo "STALE: $SPKG 登錄=$SREG 模組=$SVC（PM 嚴格升級保留 EU manifest；待 payload 升版／GetApps CN 更新／OTA 收斂）" >> "$DATA_INSTALL_LOG"
             fi
             ;;
-    esac
-done
+        esac
+    done < "$PAYLOAD_VERSIONS"
+fi
 
 # 官方 308 static overlay 在 hybrid_mount 環境可能無法新增到 /product/overlay；
 # 改由 Package Manager 安裝並讓 OverlayManager 啟用。
@@ -172,7 +244,11 @@ done
 #    逾寬限未載入就殺 GSA 的 isolated hotword process 讓系統自動重建整條
 #    鏈（細節見 dualwake_boot.sh 與 AGENTS.md「Dual-wake boot race」）。
 DUALWAKE_LOG="$MODDIR/dualwake_boot.log"
-if [ "$(settings get global voice_trigger_enabled)" = "1" ]; then
+# 只在明確「0」（使用者關閉語音喚醒）時才不跑；null（重設後尚未再設定）
+# 也要跑——worker 自己會判斷武裝與註冊狀態，閒置 12 輪即退，且 GSA 開機
+# 卡死與小愛是否武裝無關（2026-08-26 ReSukiSU 遷移後此值歸 null，閘門
+# 誤殺整個 worker，Hey Google 的卡死也沒人盯）。
+if [ "$(settings get global voice_trigger_enabled)" != "0" ]; then
     case "$(settings get secure voice_interaction_service)" in
     com.miui.voiceassist/*)
         : # 小愛已是預設助理：官方 VoiceInteractionService 鏈自己會處理

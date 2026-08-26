@@ -29,6 +29,11 @@
 #   就位，小愛 session 完全不受影響）。最多重建 DUALWAKE_GSA_MAX_FIXES
 #   次。殺的是一般 App process，不碰音訊服務，通話中也不用避讓。
 #
+#   2026-08-26 補：小愛一直未武裝（語音喚醒沒開、重置後 voice_trigger_
+#   enabled 歸 null、或屢被回收）時，GSA 的開機卡死同樣要盯——否則
+#   service.sh 閘門放寬後，這種場景下 Hey Google 整輪沒人修。未武裝
+#   滿 DUALWAKE_GSA_GRACE 輪起，與武裝路徑共用 fix_gsa_chain 與額度。
+#
 #   2026-08-24 第三種故障型態（實測）：AoHD 在 HDS 綁定「之前」就卡死
 #   ——soundtrigger 只有 ATTACH/GET_MODULE_PROPERTIES（14:09:57），isolated
 #   process 從未出現，dumpsys voiceinteraction 顯示 No Hotword detection
@@ -121,6 +126,33 @@ redeliver_bootup() {
     return 1
 }
 
+# GSA AoHD 鏈重建（武裝／未武裝路徑共用，故障型態見檔頭）：殺 isolated
+# hotword process，沒有就殺 VIS 進程；皆無對象（Voice Match 沒開或預設
+# 助理不是 Google）只觀望。額度 DUALWAKE_GSA_MAX_FIXES 兩種殺法共用。
+fix_gsa_chain() {
+    [ "$fixes" -lt "$GSA_MAX_FIXES" ] || return 0
+    pids=$(gsa_hotword_pids)
+    if [ -n "$pids" ]; then
+        fixes=$((fixes + 1))
+        # 殺 isolated process（可能多個，空白分隔）；系統自動重綁
+        "$KILL_BIN" $pids
+        echo "try $try: GSA 模型未載入，重建 AoHD 鏈（kill $(echo $pids)，第 ${fixes} 次）$(date)" >> "$LOG"
+        armed_rounds=0
+    else
+        # 連 isolated process 都沒有：AoHD 在 HDS 綁定前就卡死，
+        # 改殺 GSA 的 VIS 進程逼整條重建（見檔頭 2026-08-24）。
+        vis_pid=$(gsa_vis_pid)
+        if [ -n "$vis_pid" ]; then
+            fixes=$((fixes + 1))
+            "$KILL_BIN" $vis_pid
+            echo "try $try: GSA 無 AoHD 連線，殺 VIS 進程重建（kill $(echo ${vis_pid})，第 ${fixes} 次）$(date)" >> "$LOG"
+            armed_rounds=0
+        else
+            echo "try $try: GSA 未載入且無 isolated hotword process（Voice Match 未啟用或尚未綁定），觀望 $(date)" >> "$LOG"
+        fi
+    fi
+}
+
 try=0
 armed_rounds=0
 fixes=0
@@ -133,6 +165,10 @@ while [ "$try" -lt "$MAX_TRIES" ]; do
         try=$((try + 1))
         echo "try $try: VoiceTrigger 未武裝，重送 BootupReceiver $(date)" >> "$LOG"
         redeliver_bootup
+        # 小愛一直未武裝時 GSA 卡死也要修（見檔頭 2026-08-26）。
+        if [ "$try" -ge "$GSA_GRACE" ] && ! gsa_armed; then
+            fix_gsa_chain
+        fi
         sleep "$INTERVAL"
         continue
     fi
@@ -143,28 +179,7 @@ while [ "$try" -lt "$MAX_TRIES" ]; do
     armed_rounds=$((armed_rounds + 1))
     try=$((try + 1))
     if [ "$armed_rounds" -ge "$GSA_GRACE" ]; then
-        if [ "$fixes" -lt "$GSA_MAX_FIXES" ]; then
-            pids=$(gsa_hotword_pids)
-            if [ -n "$pids" ]; then
-                fixes=$((fixes + 1))
-                # 殺 isolated process（可能多個，空白分隔）；系統自動重綁
-                "$KILL_BIN" $pids
-                echo "try $try: GSA 模型未載入，重建 AoHD 鏈（kill $(echo $pids)，第 ${fixes} 次）$(date)" >> "$LOG"
-                armed_rounds=0
-            else
-                # 連 isolated process 都沒有：AoHD 在 HDS 綁定前就卡死，
-                # 改殺 GSA 的 VIS 進程逼整條重建（見檔頭 2026-08-24）。
-                vis_pid=$(gsa_vis_pid)
-                if [ -n "$vis_pid" ]; then
-                    fixes=$((fixes + 1))
-                    "$KILL_BIN" $vis_pid
-                    echo "try $try: GSA 無 AoHD 連線，殺 VIS 進程重建（kill $(echo ${vis_pid})，第 ${fixes} 次）$(date)" >> "$LOG"
-                    armed_rounds=0
-                else
-                    echo "try $try: GSA 未載入且無 isolated hotword process（Voice Match 未啟用或尚未綁定），觀望 $(date)" >> "$LOG"
-                fi
-            fi
-        fi
+        fix_gsa_chain
         sleep "$INTERVAL"
         continue
     fi

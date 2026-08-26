@@ -121,6 +121,38 @@ if [ ! -f "$ROOT_DIR/action.sh" ]; then
     exit 1
 fi
 
+# payload_versions.txt：所有 payload APK 的「package versionCode 模組相對路徑」
+# 清單，供 service.sh 做 data-app 期望版本查詢與系統 App 登錄稽核（PM 嚴格
+# 升級保留的自愈，見 AGENTS.md「PM 嚴格升級保留」）。建置產物，不入庫。
+AAPT2=$(ls -d "$HOME"/Library/Android/sdk/build-tools/*/aapt2 2>/dev/null | sort -V | tail -1)
+if [ -z "$AAPT2" ]; then
+    echo "找不到 aapt2（需要 Android SDK build-tools）" >&2
+    exit 1
+fi
+VERSIONS_FILE="$ROOT_DIR/payload_versions.txt"
+: > "$VERSIONS_FILE"
+for payload in $REQUIRED_PAYLOADS; do
+    PAYLOAD_APK=$(find "$ROOT_DIR/$payload" -maxdepth 1 -type f -name '*.apk')
+    BADGING=$("$AAPT2" dump badging "$PAYLOAD_APK" | head -1)
+    PNAME=$(printf '%s' "$BADGING" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")
+    PVC=$(printf '%s' "$BADGING" | sed -n "s/^package: name='[^']*' versionCode='\([0-9]*\)'.*/\1/p")
+    if [ -z "$PNAME" ] || [ -z "$PVC" ]; then
+        echo "aapt2 解析失敗: $PAYLOAD_APK" >&2
+        exit 1
+    fi
+    echo "$PNAME $PVC $payload/${PAYLOAD_APK##*/}" >> "$VERSIONS_FILE"
+done
+for payload in $DATA_APP_PAYLOADS; do
+    BADGING=$("$AAPT2" dump badging "$ROOT_DIR/$payload" | head -1)
+    PNAME=$(printf '%s' "$BADGING" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")
+    PVC=$(printf '%s' "$BADGING" | sed -n "s/^package: name='[^']*' versionCode='\([0-9]*\)'.*/\1/p")
+    if [ -z "$PNAME" ] || [ -z "$PVC" ]; then
+        echo "aapt2 解析失敗: $payload" >&2
+        exit 1
+    fi
+    echo "$PNAME $PVC $payload" >> "$VERSIONS_FILE"
+done
+
 mkdir -p "$OUTPUT_DIR"
 rm -f "$OUTPUT_PATH"
 
@@ -135,6 +167,7 @@ zip -qr "$OUTPUT_PATH" \
     uninstall.sh \
     tools/unity_install.sh \
     excluded_packages.txt \
+    payload_versions.txt \
     zygisk/arm64-v8a.so \
     zygisk/liblsplant.so \
     $REQUIRED_PAYLOADS \

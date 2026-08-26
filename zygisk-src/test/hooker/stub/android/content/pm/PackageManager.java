@@ -6,6 +6,7 @@ import android.content.Intent;
 public class PackageManager {
     public PackageInfo packageInfo;                 // null + packageInfoThrows → throw
     public boolean packageInfoThrows;
+    public PackageInfo archiveInfo;                 // getPackageArchiveInfo; null = parse failed
     public ResolveInfo resolveResult;               // may be null
 
     public int lastResolveFlags = -1;
@@ -21,6 +22,11 @@ public class PackageManager {
             throw new NameNotFoundException(packageName);
         }
         return packageInfo;
+    }
+
+    /** Real one returns null on unparseable archives instead of throwing. */
+    public PackageInfo getPackageArchiveInfo(String archiveFilePath, int flags) {
+        return archiveInfo;
     }
 
     public ResolveInfo resolveService(Intent intent, int flags) {

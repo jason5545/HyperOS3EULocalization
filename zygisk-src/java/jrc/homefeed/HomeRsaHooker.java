@@ -2,6 +2,7 @@ package jrc.homefeed;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
@@ -63,14 +64,24 @@ public final class HomeRsaHooker {
     /**
      * Version + target guard, evaluated before any ART hook is attempted.
      * 只在模組內建的 CN 桌面版本上啟用；EU 桌面不讀這個 prop，無需 hook。
+     *
+     * 版本讀「執行中的 APK 本體」（sourceDir 的 archive 解析），不讀
+     * PackageManager 登錄值：2026-08-26 ReSukiSU/hybrid_mount 實測，PM 只在
+     * versionCode 嚴格變大時重寫系統 App 登錄——遷移期 EU 底包（750062545）
+     * 被登錄後，掛回 CN 版（750062529）時 PM 永久保留 EU 登錄
+     * （getPackageInfo 回 750062545），但進程實際載入的仍是模組 CN APK。
+     * 本保護要擋的是「程式碼 shape 不符」，故必須對程式碼本體求值。
      */
     public static boolean shouldInstall(Context context) {
         try {
-            PackageInfo info = context.getPackageManager()
-                    .getPackageInfo("com.miui.home", 0);
-            long versionCode = info.getLongVersionCode();
+            ApplicationInfo appInfo = context.getApplicationInfo();
+            PackageInfo info = appInfo != null
+                    ? context.getPackageManager()
+                            .getPackageArchiveInfo(appInfo.sourceDir, 0)
+                    : null;
+            long versionCode = info != null ? info.getLongVersionCode() : -1;
             if (versionCode != EXPECTED_VERSION_CODE) {
-                Log.w(TAG, "skip: MiuiHome versionCode " + versionCode
+                Log.w(TAG, "skip: MiuiHome apk versionCode " + versionCode
                         + " != " + EXPECTED_VERSION_CODE);
                 return false;
             }

@@ -29,7 +29,10 @@ Magisk/KernelSU module: HyperOS 3 EU localization — XiaoAI voice stack, Taplus
 - `scripts/test_dualwake_boot.sh` — host-side shell test for the watchdog
 - `scripts/test_mount_scrub.sh` — host-side shell test for the scrubber and
   the power-key follow sync
-- `build.sh` — packs `dist/HyperOS3_EU_XiaoAI_Portal_MiPay_<version>.zip`
+- `build.sh` — packs `dist/HyperOS3_EU_XiaoAI_Portal_MiPay_<version>.zip`;
+  also generates `payload_versions.txt` (aapt2-derived package/versionCode
+  manifest driving the `service.sh` registration audit — build artifact,
+  not committed)
 - `customize.sh`, `tools/unity_install.sh` — install-time logic on device
 
 ## Build & test
@@ -306,8 +309,11 @@ pocket-level rejection, not a chain failure; every attempt from 11:37:31
 onward (both sides, screen on) succeeded end-to-end. Nothing in v1.0.22
 (MiuiHome payload, homefeed hooks) touches the hotword path.
 
-`service.sh` gates this on `voice_trigger_enabled=1` and XiaoAI not being
-the default assistant.
+`service.sh` gates this on `voice_trigger_enabled` not being `"0"` (explicit
+off) and XiaoAI not being the default assistant — since v1.0.31 a null value
+(post-reset / post-migration) no longer silences the worker, and the worker
+watches the GSA chain even when XiaoAI never arms (see "ReSukiSU / susfs
+migration").
 
 Residual known risk: an audioserver crash *after* the worker's boot window
 can still stale the chain silently; there is no cheap external detector
@@ -430,6 +436,112 @@ round). It only touches the two assistant functions; a deliberate
 `launch_voice_assistant` is corrected to `launch_google_search` within one
 round. Host cases 8-13 in `scripts/test_mount_scrub.sh` cover the mapping,
 the no-op/respect/off paths.
+
+## ReSukiSU / susfs migration (root causes, 2026-08-26 on myron)
+
+User migrated from KSU Next to **ReSukiSU (ksud 4.2.0-rc1) + LunarKernel V1.3
+(susfs v2.2.0)**, same OS3.0.309.0.WPMCNXM base. Symptom report: "album still
+4.3, pic edit FC, soundrec FC" — plus (found during diagnosis) homefeed hooks
+inert and dual wake fully dead. Four independent breakages, one shared origin:
+mounting and package registration behave differently here. All fixed or
+self-healing in v1.0.31; details below.
+
+### 1. Module mounting is delegated to the `hybrid_mount` metamodule
+
+ReSukiSU core does **not** mount modules itself; without the `hybrid_mount`
+metamodule (or with a broken one) the entire `system/product/…` payload is
+simply absent — `pm path com.miui.voiceassist` empty, EU stock everywhere.
+hybrid_mount **6.0.0 is broken for us, twice**:
+
+- Its shipped `config.toml` carries a `[kasumi]` section the 6.0.0 binary
+  rejects ("unknown field `kasumi`") → config load fails → defaults.
+- Default `overlay_mode=ext4` stages a **shared overlay tree** by copying all
+  module files into a fixed-size ext4 image
+  (`/data/adb/hybrid-mount/modules.img`); our ~962 MB module overflows it →
+  `stage shared overlay tree: No space left on device` → **all** overlay
+  modules unmounted for the whole boot (an earlier boot failed the same batch
+  on the adreno module's missing `/vendor/gpu` target instead).
+
+hybrid_mount **4.2.0-1815 works** (`mount_errors=0, active_mounts=odm,product,
+system,vendor`). Stay on it; do not "upgrade" to 6.0.0 without re-testing.
+Side effect of the staged copy: served files carry early-boot-clock mtimes
+(e.g. `1970-01-11 11:41`) instead of the module-dir real dates KSU Next's
+bind/lowerdir mounts used to show.
+
+### 2. PM 嚴格升級保留 (the FC / stale-version mechanism)
+
+PackageManager rewrites a system-app registration **only when the newly
+scanned versionCode is strictly greater than the registered one** (or no
+registration exists). Verified end-to-end on-device:
+
+- The migration boot(s) ran with no/broken mounts → PM registered **EU stock**
+  (lastUpdateTime `1970-01-10 20:29:53` = that boot's pre-timesync clock):
+  MiuiHome 750062545, SoundRecorder 708099, MediaEditor 204990043**-global**,
+  ThemeManager 10952, AiAsstVision 540120660.
+- Mounts restored → PM logs `changed; collecting certs` for the three payload
+  APKs but **keeps the EU registration** (CN vc is lower or equal).
+  Result: EU manifest + CN code — SoundRecorder FC
+  (`…backup.CloudBackupProvider` CNFE), MediaEditor FC (`FirebaseInitProvider`
+  CNFE), MiuiHome registered 2545 while running 2529 code (homefeed version
+  gate read the registry → inert). ThemeManager/AiAsstVision are stale the
+  same way but non-fatal so far (region flip is native-side, unaffected).
+- CN-only payloads (voiceassist 507013032, voicetrigger 2026051416, MiPay
+  chain, contentextension) registered correctly at the first rescan that saw
+  them — consistent with the same rule (no prior registration).
+- It worked for a year on KSU Next because the first post-reset boot always
+  had mounts up (CN registered into an empty packages.xml) and payload bumps
+  were always strict vc increases. The rule only bites when a boot registers
+  EU stock **over** existing CN registrations — i.e. exactly a migration /
+  failed-mount boot on the 309 base, whose EU vcs exceed our pins.
+- `packages.xml` is **ABX binary XML** (magic `ABX`) — no shell surgery.
+  CorePatch is **not** involved (verified in the fork source: its only
+  downgrade hook is install-flow `checkDowngrade(PackageInfoLite)`, which the
+  boot scan never calls; payload and EU stock share the same `c9009d01`
+  platform signature, so the replacement path never hits a verify-failure
+  hook).
+
+### 3. What v1.0.31 ships about it
+
+- `payload_versions.txt` — build-time generated (`build.sh`, via aapt2;
+  hard-fails without it) manifest of `package versionCode module-rel-path`
+  for every payload APK. Single source of truth; kills the hardcoded-vc drift
+  class (service.sh expected gallery 5000507 while the shipped APK was
+  already 5000712).
+- `service.sh` registration audit every boot: registration ≠ shipped vc →
+  auto **data-shadow** when CN vc ≥ stuck registration and the payload is not
+  a priv-app (priv-apps would lose privileged grants as data apps) —
+  MediaEditor (204990043 == 204990043) is fixed this way; everything else
+  gets a loud `STALE:` line in `data_app_install.log`. Convergence paths for
+  the rest: GetApps CN update with vc > EU 309 stock (its data install
+  shadows cleanly), a payload bump in this repo (then re-verify hook shapes
+  and re-pin), or the next OTA (`mIsUpgrade` full rescan). On ROM change
+  (SystemVersion marker) the shadows are uninstalled first so the post-OTA
+  rescan re-registers systemless.
+- `ensure_data_app` retries `pm install` in-round (3 × 2s, judged by the
+  `Success` string) — the boot-storm `Failed transaction (2147483646)` cost
+  Gallery a whole boot ("album still 4.3").
+- Dual-wake gate relaxed to `voice_trigger_enabled != "0"` — after a reset /
+  migration the setting is **null**, and the old `== "1"` gate silently
+  killed the worker (both wakes dead). `dualwake_boot.sh` now also watches
+  GSA when XiaoAI never arms (shared `fix_gsa_chain` + shared kill budget) —
+  otherwise Hey Google boot wedges have no watcher in exactly that scenario.
+  Host cases 1/10 updated, 14-16 added (55 checks total).
+- `HomeRsaHooker.shouldInstall` now versions the **running APK**
+  (`getPackageArchiveInfo(getApplicationInfo().sourceDir)`) instead of the PM
+  registry — the pin protects against unknown code shapes, so it must bind to
+  the code, not to a possibly-stale registration. Homefeed works even while
+  PM still says 2545. The equivalent pins elsewhere (VoiceTrigger 2026051416)
+  are CN-only packages with no EU counterpart and were not touched.
+
+### 4. susfs does **not** obsolete the mount scrubber
+
+susfs (`hide_sus_mnts`) hides KSU's own mounts, but not hand-rolled runtime
+binds: BW_Audio's watchdog re-binds were observed leaking into
+`gms.persistent` on this very setup (scrubbed 14:06, same as before). Keep
+`mount_scrub.sh` unconditional. Zygisk is provided by the Zygisk Next module
+(`zygisksu`); it loads our module fine (dmesg), but remaps module memory
+anonymous — `/proc/<pid>/maps` no longer shows the module path, so a maps
+grep is not a load check under ZN (use behavior/logcat instead).
 
 ## Deploy
 
