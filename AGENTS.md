@@ -459,12 +459,40 @@ when `SystemCompat.i() && A() && p()` all pass —
 - `A()` — calls `content://com.xiaomi.aiasst.service.aicall.provider` method
   `GET_AICALL_AVAILABLE`; needs `KEY_STATUS_CODE` ∈ {1,3,4}.
 
-Provider-side status (`AICallProvider.b()`): 6 when `AbstractC0709u.q()`
-fails (privacy / user_cta not accepted — both already true on myron), 2 when
-`e0.a()` fails (`ro.miui.ui.version.code` < 10; myron has 816), otherwise
-`SettingsSp.getInCallCtrlButton(false) ? 1 : 0`. The key is
-`incallctrlbutton` (boolean) in shared_prefs `setting.xml` — **absent by
-default after a reset → status 0 → entry hidden**. That was the whole bug.
+Provider-side status — **the provider dispatches by method**: the jadx
+switch sends `GET_AICALL_AVAILABLE` to `p033g2.a.b()` and only
+`GET_INCALL_VOICE_SETTINGS` to `AICallProvider.b()`. The first diagnosis
+(status = `incallctrlbutton`) read the wrong branch — writing that key
+alone does NOT bring the ⋮-menu entry back (live-verified).
+
+`a.b()` (the real ⋮-menu gate): `e()` (`l0.g` mode) → 4 (also allowed);
+`f()` (focus mode) → 5; **`h()` → 1**; otherwise → 2 (hidden). `h()` is
+`SettingsSp.getAIcallStatus(h.s().h("ai_call_callscreen"))` = boolean
+`aicall_onoff` in shared_prefs `setting.xml`, default from the
+`ai_call_callscreen` cloud key — which EU never receives → **default false
+→ status 2 → entry hidden**. That was the whole bug.
+
+`SettingsSp` keys, all in shared_prefs `setting.xml`
+(`getSharedPreferences("setting", 0)`):
+
+- `aicall_onoff` (`AICALL_ON`) — master switch, the ⋮-menu gate above
+  (cloud `ai_call_callscreen`).
+- `callscreen_onoff` (`AICALLSCREEN_ON_INTERIOR`) — in-call entry
+  (cloud `ai_call_callscreen_entrance`, also absent on EU).
+- `incallctrlbutton` (`INCALLCTRLBUTTON`) — in-call voice-control button;
+  this is what `AICallProvider.b()` (the `GET_INCALL_VOICE_SETTINGS`
+  branch: 6 when `AbstractC0709u.q()` fails / 2 when
+  `ro.miui.ui.version.code` < 10 / else `getInCallCtrlButton ? 1 : 0`)
+  actually drives.
+- `privacy` — AI-call privacy CTA consent (`BaseActivity.c0/e0` →
+  `putPrivacy(true)`; `AbstractC0709u.q()` caches true only). Whether it
+  independently gates `GET_AICALL_AVAILABLE` was never isolated — the
+  verified-working configuration sets all four, and consent is required
+  elsewhere in the flow (the status-6 branch, the settings page). The CTA
+  dialog can be summoned manually with
+  `am start -n com.xiaomi.aiasst.service/.aicall.activities.CtaDialogActivity`
+  (started directly its callback is null, so only `privacy` gets written,
+  not `callscreen_onoff`).
 
 Three live-verified pitfalls (all hit first-hand):
 
@@ -480,23 +508,26 @@ Three live-verified pitfalls (all hit first-hand):
   To make the app re-read prefs, `kill` the process instead — plain kill
   does not set the stopped flag.
 - Probing the provider as root/shell (`content call`) is a red herring:
-  the caller check (`getPackagesForUid(0)` → null) returns null. Only uid
+  the caller check (`getPackagesForUid(0)` → null) returns null, and even
+  `su 1001` dies on `ACCESS_CONTENT_PROVIDERS_EXTERNALLY`. Only uid
   1000/1001 and `com.android.{server.telecom,incallui,contacts,phone}` /
   `com.xiaomi.{aiasst.service,phone}` with a matching system signature are
   served. Judge status from the dialer's own log (`SystemCompat: status
   code:N` via `Logger.f`, not logcat) or the menu itself.
 
-Fix (v1.0.32): `aicall_defaulton.sh`, a one-shot worker started by
-`service.sh` (same `/data/local/tmp` nohup pattern as dualwake): writes
-`incallctrlbutton=true` only when the key is absent (explicit user on/off is
-respected), using tmp-file → chown/chmod (dir owner, 0660) → `mv` (atomic
-rename; **never `sed -i`** — toybox sed -i creates a new root-owned inode
-the app cannot read); grants appops `SYSTEM_ALERT_WINDOW` only when the mode
-is `default`; kills the app process afterwards if running so it re-reads
-prefs (SharedPreferences never notices external file changes). Host test:
-`scripts/test_aicall_defaulton.sh` (29 checks). The old `action.sh` (a
-shortcut that only opened that settings page) was removed in v1.0.32 —
-default-on made it pointless.
+Fix (v1.0.33): `aicall_defaulton.sh`, a one-shot worker started by
+`service.sh` (same `/data/local/tmp` nohup pattern as dualwake), forces all
+four keys to `true` every boot — user asked for unconditional default-on,
+so an explicit `false` is flipped back too (v1.0.32 wrote only absent keys,
+and only `incallctrlbutton`, which targeted the wrong branch). Mechanics:
+tmp-file → chown/chmod (dir owner, 0660) → `mv` (atomic rename; **never
+`sed -i`** — toybox sed -i creates a new root-owned inode the app cannot
+read); appops `SYSTEM_ALERT_WINDOW` → `allow` unconditionally (same
+default-on policy); kills the app process afterwards only when a write
+actually happened and it is running (the all-true path exits early without
+touching the process). Host test: `scripts/test_aicall_defaulton.sh`
+(39 checks). The old `action.sh` (a shortcut that only opened that
+settings page) was removed in v1.0.32 — default-on made it pointless.
 
 
 

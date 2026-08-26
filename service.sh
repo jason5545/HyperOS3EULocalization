@@ -236,12 +236,13 @@ done
     settings put system global_power_guide 0
 
 # --- AI 通話入口預設開啟 -----------------------------------------------------
-# 2026-08-26 定因（詳見 AGENTS.md「AI 通話入口 gate 與預設開啟」與
-# aicall_defaulton.sh 檔頭）：撥號盤 ⋮ 選單／通話中按鈕的 AI 通話入口由
-# MIUIAiasstService 的 AICallProvider status 決定，status =
-# shared_prefs 的 incallctrlbutton；恢復原廠後該 key 不存在（入口整個
-# 隱藏），設定頁開關又會在缺懸浮窗權限時只彈框不落盤。一次性 worker
-# 補預設 true＋overlay 權限；已表態（開或關）一律不動。同 dualwake
+# 2026-08-26 定因（詳見 AGENTS.md「AI-call entry gate & default-on」與
+# aicall_defaulton.sh 檔頭）：撥號盤 ⋮ 選單／通話中的 AI 通話入口由
+# MIUIAiasstService provider 的 GET_AICALL_AVAILABLE status 決定，真正的
+# gate 是 shared_prefs setting.xml 的 aicall_onoff（雲控在 EU 預設 false，
+# 恢復原廠後 key 不存在 → 入口整個隱藏）。一次性 worker 把
+# aicall_onoff/callscreen_onoff/incallctrlbutton/privacy 四鍵全補 true
+# ＋overlay 權限（使用者要求無條件開啟，明確 false 也翻回）。同 dualwake
 # 模式：複製到 /data/local/tmp 執行，跑完即退。
 AICALL_TMP=/data/local/tmp/jrc_aicall_defaulton.sh
 cp "$MODDIR/aicall_defaulton.sh" "$AICALL_TMP"
