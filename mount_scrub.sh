@@ -34,12 +34,14 @@
 #   MOUNT_SCRUB_PROC_ROOT   procfs 根目錄（預設 /proc）
 #   MOUNT_SCRUB_NSENTER     nsenter 指令路徑（預設 nsenter）
 #   MOUNT_SCRUB_LOG         記錄檔路徑（預設 /dev/null）
+#   MOUNT_SCRUB_POWER_KEY_SYNC  長按電源鍵跟隨預設助理（預設 1；0 關閉）
 
 INTERVAL="${MOUNT_SCRUB_INTERVAL:-15}"
 MAX_ROUNDS="${MOUNT_SCRUB_MAX_ROUNDS:-0}"
 PROC_ROOT="${MOUNT_SCRUB_PROC_ROOT:-/proc}"
 NSENTER="${MOUNT_SCRUB_NSENTER:-nsenter}"
 LOG="${MOUNT_SCRUB_LOG:-/dev/null}"
+POWER_KEY_SYNC="${MOUNT_SCRUB_POWER_KEY_SYNC:-1}"
 
 # 與 main.cpp isSensitiveProcess 同步：gms（含 :/. 子進程）、wallet、vending。
 TARGETS='^com\.google\.android\.gms|^com\.google\.android\.apps\.walletnfcrel|^com\.android\.vending'
@@ -70,6 +72,33 @@ scrub_once() {
 ROUND=0
 while :; do
     scrub_once
+    # 長按電源鍵跟隨預設助理（2026-08-26 myron 定因）：MIUI 的
+    # 「長按電源鍵 → 語音助理」function 寫死 com.miui.voiceassist
+    # （ShortCutActionsUtils.launchVoiceAssistant 直接 setPackage），不看
+    # 「小幫手與語音助理」裡選的預設助理 → 選了 Google 長按仍跳小愛。
+    # 每輪讀 secure assistant 讓 long_press_power_key 跟隨。使用者若把電源鍵
+    # 改成非 assistant 功能（none 等）則不動，尊重明確選擇；小愛 App 內的
+    # 電源鍵喚醒開關會被 framework 搶寫回 launch_voice_assistant
+    # （IS_GLOBAL_BUILD=false 分支），此處會再扳回預設助理。
+    if [ "$POWER_KEY_SYNC" = "1" ]; then
+        ASSISTANT=$(settings get secure assistant 2>/dev/null)
+        case "$ASSISTANT" in
+            com.google.android.googlequicksearchbox/*) WANT=launch_google_search ;;
+            com.miui.voiceassist/*) WANT=launch_voice_assistant ;;
+            *) WANT= ;;
+        esac
+        if [ -n "$WANT" ]; then
+            CUR=$(settings get system long_press_power_key 2>/dev/null)
+            case "$CUR" in
+                launch_voice_assistant|launch_google_search)
+                    if [ "$CUR" != "$WANT" ] && \
+                       settings put system long_press_power_key "$WANT" 2>/dev/null; then
+                        log_line "powerkey follow assistant: ${CUR} -> ${WANT}"
+                    fi
+                    ;;
+            esac
+        fi
+    fi
     ROUND=$((ROUND + 1))
     if [ "$MAX_ROUNDS" -gt 0 ] && [ "$ROUND" -ge "$MAX_ROUNDS" ]; then
         exit 0

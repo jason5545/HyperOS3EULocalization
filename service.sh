@@ -147,6 +147,22 @@ while [ "$LOCALE_ROUND" -lt 3 ]; do
     sleep 5
 done
 
+# --- 長按電源 3 秒電源選單保底 ----------------------------------------------
+# 2026-08-26 定因（詳見 AGENTS.md「長按電源 3 秒電源選單」）：xiaomi.eu 底層
+# IS_INTERNATIONAL_BUILD=true 但 IS_GLOBAL_BUILD=false，
+# MiuiShortcutTriggerHelper.shouldShowPowerPanel() 走 CN 分支恆 false，初次
+# 計算把 should_launch_global_power_panel 寫成 0 → power_button_very_long_press=0
+# → 長按電源 3 秒的電源選單整個消失（小愛那個圓圈只是倒數動畫，選單本體是
+# framework 的 very-long-press → GLOBAL_ACTIONS）。framework 對
+# should_launch_global_power_panel 有 observer，補回 1 會立刻重算寫回
+# power_button_very_long_press=1；global_power_guide=0 是給開機早期
+# mShouldShowPowerPanel==-1 的初始路徑兜底（該路徑讀這個 v1 key，
+# 值缺省當 1 會把選單算成關閉）。
+[ "$(settings get system should_launch_global_power_panel)" = "1" ] || \
+    settings put system should_launch_global_power_panel 1
+[ "$(settings get system global_power_guide)" = "0" ] || \
+    settings put system global_power_guide 0
+
 # --- 雙喚醒冷開機保底 -------------------------------------------------------
 # 1) 冷開機記憶體高峰時，MIUI 可能在 BootupReceiver 結束後數十毫秒內回收
 #    com.miui.voiceassist:voice_trigger，讓 CoreAlive 內部的 bind 來不及執行。

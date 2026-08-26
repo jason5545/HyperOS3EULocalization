@@ -24,9 +24,11 @@ Magisk/KernelSU module: HyperOS 3 EU localization — XiaoAI voice stack, Taplus
   `/data/local/tmp` and run in the background (see "Dual-wake boot race" below)
 - `mount_scrub.sh` — sensitive-process mount-namespace scrubber, same
   `/data/local/tmp` background-worker pattern (see "Sensitive-process mount
-  scrub" below)
+  scrub" below); its 15s loop also carries the power-key assistant-follow
+  sync (see "Power-key 3s power menu" below)
 - `scripts/test_dualwake_boot.sh` — host-side shell test for the watchdog
-- `scripts/test_mount_scrub.sh` — host-side shell test for the scrubber
+- `scripts/test_mount_scrub.sh` — host-side shell test for the scrubber and
+  the power-key follow sync
 - `build.sh` — packs `dist/HyperOS3_EU_XiaoAI_Portal_MiPay_<version>.zip`
 - `customize.sh`, `tools/unity_install.sh` — install-time logic on device
 
@@ -363,6 +365,71 @@ Safety invariants (host test `scripts/test_mount_scrub.sh` covers them):
 
 On a susfs kernel this whole class disappears (`hide_sus_mnts`); myron runs
 the official GKI kernel, so the scrubber is the stock-kernel equivalent.
+
+## Power-key 3s power menu (root cause, 2026-08-26 on myron)
+
+Symptom: long-press power wakes XiaoAI, but holding past 3s never shows the
+power menu. Logcat shows XiaoAI's own part working end-to-end
+(`VA_PowerKeyProcessor` KEY_EVENT_DOWN → +~700ms `VA_ShutdownViewManager
+addShutdownView` + `VA_CircleProgressbar` 1950ms → +2650ms
+`closeShutdownRunnable` removes it; +9.75s would show a reboot layer, +12s
+force reboot). **That ring is only a countdown animation — XiaoAI never draws
+a power menu.** The menu itself is the framework's very-long-press path:
+`PowerKeyRule.onMiuiVeryLongPress` falls through to AOSP
+`PhoneWindowManager`, which follows `mVeryLongPressOnPowerBehavior`, driven
+by `Settings.Global.power_button_very_long_press`.
+
+MIUI writes that global from `MiuiShortcutTriggerHelper
+.setVeryLongPressPowerBehavior()` → `getVeryLongPressPowerBehavior()`: setup
+complete + `long_press_power_key` non-empty + `shouldShowPowerPanel()`. On
+the xiaomi.eu myron base, `Build.IS_INTERNATIONAL_BUILD=true` but
+`IS_GLOBAL_BUILD=false`, so `shouldShowPowerPanel()` takes the CN branch
+(`mSupportXiaoaiLongpressPowerKeyTalk && supportXiaoaiLongPressPowerKeyTalk`)
+which is always false on INTL, then the `mShouldShowPowerPanel == -1`
+fallback reads v1 key `global_power_guide` (absent → default 1) → computes
+0 → writes `should_launch_global_power_panel=0` → very-long-press NOTHING.
+(`InputFeature.supportGlobalPowerGuide_V2()` reads
+`com.miui.securitycore` meta-data `miuiShortCutVersion` — it IS 5 on
+xiaomi.eu's SecurityCoreAdd, so the RSA-region branch with the
+`should_launch_global_power_panel` observer is active; the global branch of
+`shouldShowPowerPanel` just never gets used because `IS_GLOBAL_BUILD` is
+false.)
+
+Fix (live-verified 2026-08-26, menu appears at 3s hold):
+`settings put system should_launch_global_power_panel 1` — the framework
+observer instantly recomputes and writes `power_button_very_long_press=1`.
+`service.sh` re-ensures it every boot, plus `global_power_guide 0` as
+insurance for the `== -1` init path (absent/default-1 would compute the
+panel off). Both writes are inert on real CN builds (different observer key,
+CN branch returns earlier). Power+VolUp (`POWER_VOLUME_UP_BEHAVIOR_
+GLOBAL_ACTIONS`) always works as a fallback regardless of these settings.
+
+Related gotcha (same code path): the long-press function itself is chosen by
+`Settings.System.long_press_power_key`. `launch_voice_assistant` is
+**hardcoded to XiaoAI** — `ShortCutActionsUtils.launchVoiceAssistant()` does
+`intent.setPackage("com.miui.voiceassist")` with the component from a
+framework-res string, ignoring the user's default-assistant choice (Google).
+`launch_google_search` instead goes through `launchAssistAction()` → the
+default assistant. Its direct path requires `isSupportRsa()` false, which
+holds only while `global_power_guide_v2` stays 0 — if anything sets it to 1,
+the "power guide" branch fires and (because `IS_GLOBAL_BUILD` is false)
+launches XiaoAI with a guide extra instead. Toggling 電源鍵喚醒 inside the
+XiaoAI app writes `long_press_power_launch_xiaoai=1`, and the framework
+observer then force-rewrites `long_press_power_key` back to
+`launch_voice_assistant` on this base — so a Google power-key choice must
+leave XiaoAI's in-app power-key toggle off.
+
+Follow sync (v1.0.30): since the framework never links the two settings, the
+`mount_scrub.sh` worker's 15s loop reads `Settings.Secure.assistant` and
+rewrites `long_press_power_key` to match — GSA → `launch_google_search`,
+XiaoAI → `launch_voice_assistant` — so switching assistant in 小幫手與語音助理
+auto-switches the power key (and reverts the XiaoAI-toggle grab within one
+round). It only touches the two assistant functions; a deliberate
+`none`/other power-key assignment is respected. Disable with
+`MOUNT_SCRUB_POWER_KEY_SYNC=0`. Live-verified: flip to
+`launch_voice_assistant` is corrected to `launch_google_search` within one
+round. Host cases 8-13 in `scripts/test_mount_scrub.sh` cover the mapping,
+the no-op/respect/off paths.
 
 ## Deploy
 

@@ -63,15 +63,34 @@ EOF
 #!/bin/sh
 :
 EOF
-    chmod +x "$STUB"/pgrep "$STUB"/nsenter "$STUB"/sleep
+    cat > "$STUB/settings" <<'EOF'
+#!/bin/sh
+# settings get|put <namespace> <key> [value]；state 存 $STUB_STATE/settings.*
+NS="$2"; KEY="$3"
+F="$STUB_STATE/settings.$NS.$KEY"
+case "$1" in
+    get) if [ -f "$F" ]; then cat "$F"; else echo "null"; fi ;;
+    put) echo "$4" > "$F"
+         echo "put $NS $KEY $4" >> "$STUB_STATE/settings_calls" ;;
+esac
+EOF
+    chmod +x "$STUB"/pgrep "$STUB"/nsenter "$STUB"/sleep "$STUB"/settings
 
     : > "$STATE/calls"
+    : > "$STATE/settings_calls"
     STUB_STATE="$STATE" STUB_PROC="$PROC" PATH="$STUB:/usr/bin:/bin" \
         MOUNT_SCRUB_INTERVAL=0 MOUNT_SCRUB_MAX_ROUNDS="$1" \
         MOUNT_SCRUB_PROC_ROOT="$PROC" MOUNT_SCRUB_LOG="$TMP/scrub.log" \
+        MOUNT_SCRUB_POWER_KEY_SYNC="${MOUNT_SCRUB_POWER_KEY_SYNC:-1}" \
         sh "$WORKER"
     echo "rc=$?"
     cat "$STATE/calls"
+    echo "--- settings:"
+    for f in "$STATE"/settings.*.*; do
+        [ -f "$f" ] && echo "${f#$STATE/settings.}=$(cat "$f")"
+    done
+    echo "--- settings_calls:"
+    cat "$STATE/settings_calls"
     echo "--- log:"
     cat "$TMP/scrub.log" 2>/dev/null || true
     rm -rf "$TMP"
@@ -159,7 +178,69 @@ EOF
 OUT=$(run_worker 1 0 setup_dup)
 check '重複掛載點:只清一次' 1 "$(printf '%s' "$OUT" | count ' umount ')"
 
-# --- 案例 7:靜態檢查 — pgrep pattern 必須錨定（防誤清 root namespace）---------
+# --- 案例 8:預設助理 Google、電源鍵在小愛 → 扳回 Google -----------------------
+setup_sync_to_google() {
+    setup_clean
+    echo 'com.google.android.googlequicksearchbox/com.google.android.voiceinteraction.GsaVoiceInteractionService' \
+        > "$STATE/settings.secure.assistant"
+    echo 'launch_voice_assistant' > "$STATE/settings.system.long_press_power_key"
+}
+OUT=$(run_worker 1 0 setup_sync_to_google)
+check '跟隨:扳回 Google' 1 \
+    "$(printf '%s' "$OUT" | count 'system.long_press_power_key=launch_google_search')"
+check '跟隨:有 put 記錄' 1 \
+    "$(printf '%s' "$OUT" | count 'put system long_press_power_key launch_google_search')"
+check '跟隨:log 有記錄' 1 "$(printf '%s' "$OUT" | count 'powerkey follow assistant')"
+
+# --- 案例 9:已經一致 → 不重複寫入 ----------------------------------------------
+setup_sync_already() {
+    setup_clean
+    echo 'com.google.android.googlequicksearchbox/com.google.android.voiceinteraction.GsaVoiceInteractionService' \
+        > "$STATE/settings.secure.assistant"
+    echo 'launch_google_search' > "$STATE/settings.system.long_press_power_key"
+}
+OUT=$(run_worker 1 0 setup_sync_already)
+check '一致:不寫入' 0 "$(printf '%s' "$OUT" | count 'put system long_press_power_key')"
+
+# --- 案例 10:預設助理小愛、電源鍵在 Google → 扳回小愛 ---------------------------
+setup_sync_to_xiaoai() {
+    setup_clean
+    echo 'com.miui.voiceassist/com.xiaomi.voiceassistant.VoiceService' \
+        > "$STATE/settings.secure.assistant"
+    echo 'launch_google_search' > "$STATE/settings.system.long_press_power_key"
+}
+OUT=$(run_worker 1 0 setup_sync_to_xiaoai)
+check '跟隨:扳回小愛' 1 \
+    "$(printf '%s' "$OUT" | count 'put system long_press_power_key launch_voice_assistant')"
+
+# --- 案例 11:電源鍵是非 assistant 功能 → 尊重不動 -------------------------------
+setup_sync_respect_none() {
+    setup_clean
+    echo 'com.google.android.googlequicksearchbox/com.google.android.voiceinteraction.GsaVoiceInteractionService' \
+        > "$STATE/settings.secure.assistant"
+    echo 'none' > "$STATE/settings.system.long_press_power_key"
+}
+OUT=$(run_worker 1 0 setup_sync_respect_none)
+check '非 assistant:不動' 0 "$(printf '%s' "$OUT" | count 'put system long_press_power_key')"
+check '非 assistant:值仍在' 1 \
+    "$(printf '%s' "$OUT" | count 'system.long_press_power_key=none')"
+
+# --- 案例 12:沒有預設助理 → 不動 -------------------------------------------------
+setup_sync_no_assistant() {
+    setup_clean
+    echo 'launch_voice_assistant' > "$STATE/settings.system.long_press_power_key"
+}
+OUT=$(run_worker 1 0 setup_sync_no_assistant)
+check '無助理:不動' 0 "$(printf '%s' "$OUT" | count 'put system long_press_power_key')"
+
+# --- 案例 13:POWER_KEY_SYNC=0 → 整個關閉（放最後,dash 下 env 前綴會殘留）-------
+MOUNT_SCRUB_POWER_KEY_SYNC=0
+export MOUNT_SCRUB_POWER_KEY_SYNC
+OUT=$(run_worker 1 0 setup_sync_to_google)
+check '關閉:不動' 0 "$(printf '%s' "$OUT" | count 'put system long_press_power_key')"
+unset MOUNT_SCRUB_POWER_KEY_SYNC
+
+# --- 案例 14:靜態檢查 — pgrep pattern 必須錨定（防誤清 root namespace）---------
 BAD=$(grep -vE '^[[:space:]]*#' "$WORKER" | grep 'pgrep' | grep -vc 'pgrep -f "$TARGETS"')
 check 'worker pgrep 只用錨定 TARGETS' 0 "$BAD"
 ANCHORS=$(grep '^TARGETS=' "$WORKER" | grep -o '\^com' | wc -l | tr -d ' ')
