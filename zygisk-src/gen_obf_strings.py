@@ -55,6 +55,7 @@ STRINGS = {
     "VoiceTrigger":    "com.miui.voicetrigger",
     "VoiceTriggerPfx": "com.miui.voicetrigger:",
     "MiuiHome":        "com.miui.home",
+    "MediaEditor":     "com.miui.mediaeditor",
     # flip target (miui.os.Build)
     "BuildClass": "miui/os/Build",
     "IntlField":  "IS_INTERNATIONAL_BUILD",

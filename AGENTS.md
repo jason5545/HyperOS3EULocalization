@@ -13,12 +13,14 @@ Magisk/KernelSU module: HyperOS 3 EU localization — XiaoAI voice stack, Taplus
 - `payload/` — data-app APKs installed by the on-device service script
 - `zygisk-src/` — Zygisk module (`main.cpp` = Taplus INTL flip + sensitive-process
   policy, `dualwake.cpp` = dual wake, `homefeed.cpp` = MiuiHome hooks: Google-feed
-  prop, minus-screen reroute, widget-picker reroute, `art_resolver.cpp` = ART
+  prop, minus-screen reroute, widget-picker reroute, `mmedit.cpp` = MediaEditor
+  region prop hook (CN AI cloud endpoint), `art_resolver.cpp` = ART
   symbol resolver, `obfstr.h` + `gen_obf_strings.py` = build-time XOR string
   encoding)
 - `zygisk-src/test/` — host-side mock test (no device needed); `test/hooker/` —
-  JVM regression test for the `jrc.homefeed` hookers (hand-rolled Android stubs
-  + fake hook-target classes with the same shapes as the pinned CN build)
+  JVM regression test for the `jrc.homefeed` / `jrc.mmedit` hookers (hand-rolled
+  Android stubs + fake hook-target classes with the same shapes as the pinned
+  CN build)
 - `scripts/build_zygisk.sh` — native build (needs `NDK_BUILD=/path/to/ndk-build`)
 - `dualwake_boot.sh` — dual-wake cold-boot watchdog, copied by `service.sh` to
   `/data/local/tmp` and run in the background (see "Dual-wake boot race" below)
@@ -151,6 +153,22 @@ checks, and the dir is ignored wherever the APK loads libs from itself.
   (`LauncherAssistantCompat.newInstance`) requires
   `miui.os.Build.IS_INTERNATIONAL_BUILD == true`. Both hold regardless of the
   exclusion list (hardcoded in `main.cpp`).
+- `com.miui.mediaeditor` must never be dlclosed (the Taplus flip still applies —
+  unlike miui_home it IS flipped) — the mmedit worker lives in the module and
+  lsplant-hooks `android.os.SystemProperties.get(String)` inside the editor
+  process only, answering `CN` for `ro.miui.region`. Root cause (2026-08-28,
+  myron): the editor's AI cloud features (超高畫質 `/image_enhancer/provider` =
+  `aigc_image_edgecloud_enhance_v2`, service_type `ai_avatar`) pick their
+  inference endpoint from the cloud-config `cloud_ai_config` region→URL table
+  keyed by that prop — `tw`/`hk`/`default` → `sgp-ai-photo.engine.intl.miui.com`,
+  whose gateway accepts the task but whose inference backend fails it within
+  ~1s (`taskStatus=4003`, misleadingly toasted as 請求超時 /
+  `toast_aigc_network_time_out`; verified 5× over 6h). Same account + same
+  photo via the `cn` endpoint `avatar-ai.sec.miui.com` succeeds (2x upscale,
+  ~80s). The hooker (`jrc.mmedit.RegionHooker`) is NOT version-pinned — the
+  hooked shape is a framework method, not app code (contrast HomeRsaHooker).
+  Never `resetprop ro.miui.region` globally instead — that flips the whole
+  system's region behavior; the spoof is per-process by design.
 - The CN MiuiHome payload (`system/product/priv-app/MiuiHome`,
   RELEASE-7.50.06.2529 / vc 750062529) gets its Google feed option from the
   homefeed hook, not from props: CN `DeviceConfig.isUseGoogleMinusScreen()`

@@ -62,6 +62,8 @@ static int g_voice_trigger_starts = 0;
 static int g_lsplant_preloads = 0;
 static int g_homefeed_preloads = 0;
 static int g_homefeed_starts = 0;
+static int g_mmedit_preloads = 0;
+static int g_mmedit_starts = 0;
 
 MockJniKnobs g_jni;
 
@@ -88,6 +90,10 @@ void dualwakeStartVoiceTrigger(JavaVM *) { g_voice_trigger_starts++; }
 // homefeed stubs (signatures from homefeed.h, pulled in by main.cpp)
 void homefeedPreloadLsplant() { g_homefeed_preloads++; }
 void homefeedStartMiuiHome(JavaVM *) { g_homefeed_starts++; }
+
+// mmedit stubs (signatures from mmedit.h, pulled in by main.cpp)
+void mmeditPreloadLsplant() { g_mmedit_preloads++; }
+void mmeditStartEditor(JavaVM *) { g_mmedit_starts++; }
 
 static JavaVM_ g_fake_vm;
 int JNIEnv_::GetJavaVM(JavaVM_ **vm) {
@@ -157,6 +163,7 @@ static void resetState() {
     g_fopen_calls = 0;
     g_core_alive_starts = g_voice_trigger_starts = g_lsplant_preloads = 0;
     g_homefeed_preloads = g_homefeed_starts = 0;
+    g_mmedit_preloads = g_mmedit_starts = 0;
     g_jni = MockJniKnobs{};
 }
 
@@ -268,6 +275,45 @@ static void testMiuiHome() {
     CHECK(g_options.empty());
     CHECK(g_homefeed_preloads == 1 && g_homefeed_starts == 1);
     CHECK(g_jni.set_static_bool_calls == 0);
+    unlink(tmp);
+}
+
+static void testMediaEditor() {
+    g_case = "mediaeditor: resident, region hook, still flipped";
+    resetState();
+    g_access_result = 0;            // debug flag "exists"
+    g_jni.find_class_ok = true;     // miui.os.Build present
+    g_jni.static_bool_value = true; // IS_INTERNATIONAL_BUILD currently true
+    specialize("com.miui.mediaeditor");
+    CHECK(g_options.empty());                  // stays resident (no dlclose)
+    CHECK(g_mmedit_preloads == 1);             // lsplant preloaded in pre
+    CHECK(g_mmedit_starts == 1);               // region-hook worker started in post
+    CHECK(g_jni.set_static_bool_calls == 1);   // unlike miui_home, the editor
+                                               // keeps the Taplus flip
+
+    // dotted/colon child processes are the same package
+    resetState();
+    specialize("com.miui.mediaeditor:push");
+    CHECK(g_mmedit_starts == 1);
+
+    // bare prefix must NOT match
+    g_case = "mediaeditor: prefix boundary";
+    resetState();
+    specialize("com.miui.mediaeditorx");
+    CHECK(g_mmedit_preloads == 0 && g_mmedit_starts == 0);
+
+    // the exclude list must not unload the editor either (worker must stay)
+    g_case = "mediaeditor: exclusion cannot unload";
+    resetState();
+    char tmp[] = "/tmp/taplus_test_exclude_mmedit.XXXXXX";
+    int fd = mkstemp(tmp);
+    const char *content = "com.miui.mediaeditor\n";
+    write(fd, content, strlen(content));
+    close(fd);
+    g_exclude_override = tmp;
+    specialize("com.miui.mediaeditor");
+    CHECK(g_options.empty());
+    CHECK(g_mmedit_preloads == 1 && g_mmedit_starts == 1);
     unlink(tmp);
 }
 
@@ -393,6 +439,7 @@ int main() {
     testVoiceTrigger();
     testNonSensitiveDebugFlip();
     testMiuiHome();
+    testMediaEditor();
     testThemeRegionFlipIsImmediate();
 
     if (g_failures == 0) {

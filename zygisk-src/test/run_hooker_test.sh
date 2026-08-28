@@ -1,7 +1,7 @@
 #!/bin/sh
-# Build & run the host-side JVM regression test for the MiuiHome homefeed
-# hookers (jrc.homefeed.*). Android APIs are replaced by hand-rolled stubs
-# under hooker/stub/, hook targets by hooker/fake/.
+# Build & run the host-side JVM regression test for the in-app hookers
+# (jrc.homefeed.*, jrc.mmedit.*). Android APIs are replaced by hand-rolled
+# stubs under hooker/stub/, hook targets by hooker/fake/.
 set -eu
 
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -16,6 +16,7 @@ javac -d "$BUILD_DIR" \
     "$DIR/../java/jrc/homefeed/HomeRsaHooker.java" \
     "$DIR/../java/jrc/homefeed/MinusScreenHooker.java" \
     "$DIR/../java/jrc/homefeed/WidgetPickerHooker.java" \
+    "$DIR/../java/jrc/mmedit/RegionHooker.java" \
     "$DIR/hooker/HookerTestMain.java"
 
 java -cp "$BUILD_DIR" HookerTestMain

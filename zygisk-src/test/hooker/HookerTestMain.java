@@ -25,6 +25,7 @@ import java.lang.reflect.Method;
 import jrc.homefeed.HomeRsaHooker;
 import jrc.homefeed.MinusScreenHooker;
 import jrc.homefeed.WidgetPickerHooker;
+import jrc.mmedit.RegionHooker;
 
 /**
  * Host-side regression test for the MiuiHome homefeed hookers (no device, no
@@ -92,6 +93,36 @@ public final class HookerTestMain {
         } catch (IllegalStateException e) {
             check("boom".equals(e.getMessage()), "original cause, not InvocationTargetException");
         }
+    }
+
+    private static void testRegionCallback() throws Throwable {
+        caseName = "mmedit region callback";
+        RegionHooker hooker = new RegionHooker();
+        hooker.backup = backupOf("fakeSystemGet", String.class);
+
+        Object spoofed = hooker.callback(new Object[]{"ro.miui.region"});
+        check("CN".equals(spoofed), "ro.miui.region must be spoofed to CN, got " + spoofed);
+
+        Object passed = hooker.callback(new Object[]{"ro.product.device"});
+        check("real:ro.product.device".equals(passed), "other keys must pass through, got " + passed);
+    }
+
+    private static void testRegionCallbackRethrowsCause() throws Throwable {
+        caseName = "mmedit region callback exception unwrap";
+        RegionHooker hooker = new RegionHooker();
+        hooker.backup = backupOf("fakeSystemGetThrows", String.class);
+        try {
+            hooker.callback(new Object[]{"ro.x"});
+            check(false, "cause must be rethrown");
+        } catch (IllegalStateException e) {
+            check("boom".equals(e.getMessage()), "original cause, not InvocationTargetException");
+        }
+    }
+
+    private static void testRegionShouldInstall() {
+        caseName = "mmedit shouldInstall shape guard";
+        check(RegionHooker.shouldInstall(),
+                "stub SystemProperties.get(String) exists, must install");
     }
 
     private static void testShouldInstall() {
@@ -358,6 +389,9 @@ public final class HookerTestMain {
     public static void main(String[] args) throws Throwable {
         testRsaCallback();
         testRsaCallbackRethrowsCause();
+        testRegionCallback();
+        testRegionCallbackRethrowsCause();
+        testRegionShouldInstall();
         testShouldInstall();
         testServiceVersionRewrite();
         testServiceVersionHealthyUntouched();

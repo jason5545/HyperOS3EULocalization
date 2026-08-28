@@ -29,6 +29,11 @@
 // - com.miui.home 桌面：永不翻轉 IS_INTERNATIONAL_BUILD（CN 版桌面的
 //   Google 負一屏分支以它為第一道門），也永不 dlclose——homefeed worker
 //   需要在該進程常駐，攔截 ro.com.miui.rsa 的讀取讓 Google Feed 可選
+// - com.miui.mediaeditor 相簿編輯器：永不 dlclose——mmedit worker 常駐，
+//   攔截 ro.miui.region 的讀取改回 "CN"，讓 AigcCloud 的雲控 region→URL
+//   表選到 CN 推論端點（intl SGP 端點對本帳號的超高畫質任務恆回
+//   taskStatus 4003，2026-08-28 myron 實測 CN 端點正常）。Taplus 翻轉
+//   照舊（它不是 miui_home）。
 
 #include <jni.h>
 #include <android/log.h>
@@ -39,6 +44,7 @@
 
 #include "dualwake.h"
 #include "homefeed.h"
+#include "mmedit.h"
 #include "obfstr.h"
 #include "gen/obf_strings.h"
 #include "zygisk.hpp"
@@ -211,6 +217,7 @@ public:
         core_alive_ = false;
         voice_trigger_ = false;
         miui_home_ = false;
+        media_editor_ = false;
         if (!args || !args->nice_name) return;
 
         const char *nice = env_->GetStringUTFChars(args->nice_name, nullptr);
@@ -250,12 +257,14 @@ public:
                  core_alive[kObfCoreAliveLen + 1],
                  voice_trigger[kObfVoiceTriggerLen + 1],
                  voice_trigger_pfx[kObfVoiceTriggerPfxLen + 1],
-                 miui_home[kObfMiuiHomeLen + 1];
+                 miui_home[kObfMiuiHomeLen + 1],
+                 media_editor[kObfMediaEditorLen + 1];
             obf::decodeStr(kObfThemeManager, theme_manager);
             obf::decodeStr(kObfCoreAlive, core_alive);
             obf::decodeStr(kObfVoiceTrigger, voice_trigger);
             obf::decodeStr(kObfVoiceTriggerPfx, voice_trigger_pfx);
             obf::decodeStr(kObfMiuiHome, miui_home);
+            obf::decodeStr(kObfMediaEditor, media_editor);
 
             theme_manager_ = strcmp(nice, theme_manager) == 0;
             // 雙喚醒目標進程：精確辨識，絕不影響其他 app。
@@ -266,17 +275,21 @@ public:
             // 桌面進程：CN 版桌面的 Google 負一屏由 homefeed worker 負責，
             // 模組必須常駐，且絕不翻轉 IS_INTERNATIONAL_BUILD（見 postAppSpecialize）。
             miui_home_ = matchesPackageProcess(nice, miui_home);
+            // 相簿編輯器進程：mmedit worker 的 region prop hook 需要模組常駐
+            // （Taplus 翻轉照舊，見 postAppSpecialize）。
+            media_editor_ = matchesPackageProcess(nice, media_editor);
 
             obf::secureClear(theme_manager);
             obf::secureClear(core_alive);
             obf::secureClear(voice_trigger);
             obf::secureClear(voice_trigger_pfx);
             obf::secureClear(miui_home);
+            obf::secureClear(media_editor);
         }
         skip_ = isExcluded(nice);
-        if (core_alive_ || voice_trigger_ || miui_home_) {
-            // 雙喚醒 worker 與桌面 prop hook 都需要模組常駐；即使排除清單
-            // 誤加這些 package，也不能 DLCLOSE 自己。
+        if (core_alive_ || voice_trigger_ || miui_home_ || media_editor_) {
+            // 雙喚醒 worker、桌面 prop hook 與編輯器 region hook 都需要模組
+            // 常駐；即使排除清單誤加這些 package，也不能 DLCLOSE 自己。
             skip_ = false;
         }
         if (skip_) {
@@ -290,6 +303,9 @@ public:
         if (miui_home_) {
             homefeedPreloadLsplant();
         }
+        if (media_editor_) {
+            mmeditPreloadLsplant();
+        }
         env_->ReleaseStringUTFChars(args->nice_name, nice);
     }
 
@@ -298,6 +314,7 @@ public:
         if (voice_trigger_) dualwakeStartVoiceTrigger(vm_);
         if (theme_manager_) startThemeRegionWorker();
         if (miui_home_) homefeedStartMiuiHome(vm_);
+        if (media_editor_) mmeditStartEditor(vm_);
         // 桌面永不翻轉：CN 版 LauncherAssistantCompat.newInstance 以
         // miui.os.Build.IS_INTERNATIONAL_BUILD 為 Google/global 負一屏的
         // 第一道門，翻成 false 反而讓 Google Feed 消失。
@@ -313,6 +330,7 @@ private:
     bool core_alive_ = false;
     bool voice_trigger_ = false;
     bool miui_home_ = false;
+    bool media_editor_ = false;
 
     static bool matchesPackageProcess(const char *nice_name,
                                       const char *package_name) {
