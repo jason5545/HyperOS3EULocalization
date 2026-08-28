@@ -18,3 +18,5 @@ com.android.systemui
 com.xiaomi.aiasst.service
 com.google.android.apps.walletnfcrel
 com.google.android.gms
+# 偵測器類 app：排除 flip 並卸載模組 library，讓其讀到的環境不含本模組痕跡
+com.chunqiunativecheck
