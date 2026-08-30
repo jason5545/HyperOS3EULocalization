@@ -35,6 +35,10 @@ Magisk/KernelSU module: HyperOS 3 EU localization — XiaoAI voice stack, Taplus
   `service.sh` via the same `/data/local/tmp` pattern (see "AI-call entry gate
   & default-on" below)
 - `scripts/test_aicall_defaulton.sh` — its host-side shell test
+- `webroot/` — KernelSU WebUI（管理器內開啟）：只做排除清單管理——列出裝置
+  所有已安裝套件供勾選，「套用」寫回模組目錄的 `excluded_packages.txt`
+  （每個新進程 specialize 時重讀，重啟目標 app 即生效）；寫入走
+  base64 → tmp → 同目錄 `mv` 原子替換
 - `build.sh` — packs `dist/HyperOS3_EU_XiaoAI_Portal_MiPay_<version>.zip`;
   also generates `payload_versions.txt` (aapt2-derived package/versionCode
   manifest driving the `service.sh` registration audit — build artifact,

@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>翻轉排除清單</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 16px; background: #12141a; color: #e8e8ee;
+         font: 15px/1.6 -apple-system, "Segoe UI", Roboto, "Noto Sans CJK TC", sans-serif; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #8b8b96; font-size: 12px; margin-bottom: 14px; }
+  .card { background: #1b1f27; border-radius: 14px; padding: 14px 16px; margin: 0 0 14px; }
+  .hint { color: #9a9aa5; font-size: 12px; margin: 0 0 10px; }
+  .bar { display: flex; gap: 10px; margin: 0 0 10px; }
+  input[type=search] { flex: 1; background: #0f1116; color: #d5d5de;
+                       border: 1px solid #2c313c; border-radius: 8px; padding: 8px 10px; }
+  button { background: #24344f; color: #cfe0ff; border: 1px solid #36506f; border-radius: 8px;
+           padding: 8px 14px; font-weight: 600; cursor: pointer; }
+  button.apply { background: #2c4a2e; color: #c9f0cd; border-color: #40683f; }
+  .count { color: #8b8b96; font-size: 12px; margin: 0 0 8px; }
+  .row { display: flex; align-items: center; gap: 10px; padding: 6px 2px;
+         border-bottom: 1px solid #23262f; }
+  .row:last-child { border-bottom: 0; }
+  .row input { width: 18px; height: 18px; flex: none; accent-color: #4c78b8; }
+  .row label { flex: 1; font: 13px/1.4 ui-monospace, "SF Mono", Menlo, monospace;
+               word-break: break-all; }
+  .tag { flex: none; font-size: 10px; color: #9a8f6a; border: 1px solid #4a4433;
+         border-radius: 6px; padding: 1px 6px; }
+  .row.on label { color: #9ec1f5; }
+  .toast { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+           background: rgba(0,0,0,.55); z-index: 99; pointer-events: none; }
+  .toast span { display: inline-block; max-width: 80vw; background: #23262f; color: #f0f0f5;
+                padding: 14px 18px; border-radius: 12px; text-align: center; }
+</style>
+</head>
+<body>
+  <h1>翻轉排除清單</h1>
+  <div class="sub" id="ver">— 尚未載入 —</div>
+
+  <div class="card">
+    <p class="hint">勾選＝排除：跳過 <code>IS_INTERNATIONAL_BUILD</code> 翻轉，並把本模組
+      <code>.so</code> 從該進程卸掉。「套用」寫回模組目錄的 <code>excluded_packages.txt</code>，
+      每個新進程啟動時才讀——重啟目標 App 即生效，免重開機。<br>
+      <code>com.miui.home</code>、<code>com.miui.voiceassist</code>、<code>com.miui.mediaeditor</code>
+      與金流 App 由模組硬性規則保護，不受這裡的勾選影響。</p>
+    <div class="bar">
+      <input type="search" id="filter" placeholder="篩選 package…">
+      <button id="reload">重新整理</button>
+    </div>
+    <div class="count" id="count"></div>
+    <div id="list"></div>
+    <div class="bar" style="margin-top:12px">
+      <button class="apply" id="apply">套用</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"><span id="toast-text"></span></div>
+
+<script>
+const LIST_FILE = "/data/adb/modules/HyperOS3EUXiaoAiPortalMiPay/excluded_packages.txt";
+
+function sh(cmd) {
+  return new Promise((resolve) => {
+    const norm = (r) => (typeof r === "string") ? r
+      : (r && typeof r.stdout === "string") ? r.stdout
+      : (r ? String(r) : "");
+    try {
+      if (!window.ksu || !ksu.exec) return resolve("");
+      const cb = "cb_" + Math.random().toString(36).slice(2);
+      window[cb] = function () {
+        const a = arguments;
+        resolve(a.length >= 2 ? (a[1] || "") : norm(a[0]));
+        delete window[cb];
+      };
+      const r = ksu.exec(cmd, "{}", cb);
+      if (r && typeof r.then === "function") {
+        delete window[cb];
+        r.then((x) => resolve(norm(x))).catch(() => resolve(""));
+      }
+    } catch (e) { resolve(""); }
+  });
+}
+
+function toast(msg) {
+  const t = document.getElementById("toast");
+  document.getElementById("toast-text").textContent = msg;
+  t.style.display = "flex";
+  setTimeout(() => { t.style.display = "none"; }, 2400);
+}
+
+function quote(s) { return "'" + String(s).replace(/'/g, `'\\''`) + "'"; }
+
+async function b64enc(text) {
+  try {
+    const data = new TextEncoder().encode(text);
+    let bin = "";
+    for (let i = 0; i < data.length; i += 8192) {
+      bin += String.fromCharCode(...data.subarray(i, i + 8192));
+    }
+    return btoa(bin);
+  } catch (e) { return ""; }
+}
+
+// 整份檔案上傳：base64 寫到 tmp → 解碼 → 同目錄 mv 原子替換，避開引號／多位元組坑。
+async function uploadTo(path, text) {
+  const b64 = await b64enc(text);
+  if (!b64) return "EMPTY";
+  const tmp = path + ".ui";
+  const b64f = tmp + ".b64";
+  const cmd = `rm -f ${quote(tmp)} ${quote(b64f)}; ` +
+    `printf '%s' ${quote(b64)} > ${quote(b64f)}; ` +
+    // busybox 不在 PATH 時退回 toybox 內建的 base64；都失敗就直接 FAIL，
+    // 絕不把解碼失敗留下的空檔 mv 蓋到目標上。
+    `(busybox base64 -d ${quote(b64f)} > ${quote(tmp)} 2>/dev/null || base64 -d ${quote(b64f)} > ${quote(tmp)} 2>/dev/null); ` +
+    `if [ ! -s ${quote(tmp)} ]; then rm -f ${quote(tmp)} ${quote(b64f)}; echo FAIL_DECODE; ` +
+    `else chmod 0644 ${quote(tmp)} && mv -f ${quote(tmp)} ${quote(path)} && rm -f ${quote(b64f)} && echo OK || echo FAIL; fi`;
+  const out = await sh(cmd);
+  return (out || "").trim().endsWith("OK") ? "OK" : ("FAIL: " + (out || ""));
+}
+
+// 清單檔模型：保留開頭說明註解與每個條目上方的註解，套用時原樣寫回。
+let headerLines = [];
+let commentMap = new Map();  // pkg -> [註解行]
+let fileOrder = [];          // 檔案內的 pkg 順序
+let rows = [];               // {pkg, checked, installed}
+
+function parseList(text) {
+  headerLines = [];
+  commentMap = new Map();
+  fileOrder = [];
+  let pending = [];
+  let seenPkg = false;
+  for (const raw of String(text || "").split("\n")) {
+    const line = raw.replace(/\r$/, "");
+    if (line === "" || line.startsWith("#")) {
+      if (!seenPkg) headerLines.push(line);
+      else pending.push(line);
+      continue;
+    }
+    seenPkg = true;
+    commentMap.set(line, pending);
+    pending = [];
+    fileOrder.push(line);
+  }
+}
+
+function buildFile(selected) {
+  const out = [...headerLines];
+  const emitted = new Set();
+  for (const pkg of fileOrder) {
+    if (!selected.has(pkg)) continue;
+    for (const c of commentMap.get(pkg) || []) out.push(c);
+    out.push(pkg);
+    emitted.add(pkg);
+  }
+  for (const pkg of [...selected].filter((p) => !emitted.has(p)).sort()) out.push(pkg);
+  return out.join("\n") + "\n";
+}
+
+function render() {
+  const q = document.getElementById("filter").value.trim().toLowerCase();
+  const list = document.getElementById("list");
+  list.textContent = "";
+  const sorted = [...rows].sort((a, b) =>
+    (b.checked - a.checked) || a.pkg.localeCompare(b.pkg));
+  let shown = 0, picked = 0;
+  for (const r of sorted) {
+    if (r.checked) picked++;
+    if (q && !r.pkg.toLowerCase().includes(q)) continue;
+    shown++;
+    const div = document.createElement("div");
+    div.className = "row" + (r.checked ? " on" : "");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = r.checked;
+    box.onchange = () => {
+      r.checked = box.checked;
+      div.className = "row" + (r.checked ? " on" : "");
+      document.getElementById("count").textContent =
+        `已勾選 ${rows.filter((x) => x.checked).length} 個`;
+    };
+    const lab = document.createElement("label");
+    lab.textContent = r.pkg;
+    lab.onclick = () => { box.checked = !box.checked; box.onchange(); };
+    div.appendChild(box);
+    div.appendChild(lab);
+    if (!r.installed) {
+      const tag = document.createElement("span");
+      tag.className = "tag";
+      tag.textContent = "未安裝";
+      div.appendChild(tag);
+    }
+    list.appendChild(div);
+  }
+  document.getElementById("count").textContent =
+    `已勾選 ${picked} 個${q ? `（篩選後顯示 ${shown}）` : ""}`;
+}
+
+async function refresh() {
+  document.getElementById("count").textContent = "載入中…";
+  document.getElementById("list").textContent = "";
+  const fileText = await sh(`cat ${quote(LIST_FILE)} 2>/dev/null`);
+  const pmOut = await sh("pm list packages 2>/dev/null");
+  parseList(fileText);
+  const installed = new Set(
+    String(pmOut || "").split("\n")
+      .map((l) => l.trim().replace(/^package:/, ""))
+      .filter((l) => l && !l.startsWith("/") && l.indexOf(" ") < 0));
+  const selected = new Set(fileOrder);
+  const all = new Set([...installed, ...fileOrder]);
+  rows = [...all].sort().map((pkg) => ({
+    pkg,
+    checked: selected.has(pkg),
+    installed: installed.has(pkg),
+  }));
+  render();
+  if (!fileText && !pmOut) toast("讀不到清單與套件列表（ksu.exec 不可用？）");
+  else if (!pmOut) toast("pm list packages 無輸出");
+}
+
+document.getElementById("filter").oninput = render;
+document.getElementById("reload").onclick = refresh;
+document.getElementById("apply").onclick = async () => {
+  const selected = new Set(rows.filter((r) => r.checked).map((r) => r.pkg));
+  if (selected.size === 0) { toast("一個都沒勾；要清空請確認這是你要的"); return; }
+  const r = await uploadTo(LIST_FILE, buildFile(selected));
+  if (r === "OK") { toast("已套用；重啟目標 App 後生效"); refresh(); }
+  else toast("寫入失敗：" + r);
+};
+
+(async () => {
+  const mp = await sh(`cat ${quote(LIST_FILE.replace(/excluded_packages\.txt$/, "module.prop"))} 2>/dev/null`);
+  const vm = (mp || "").match(/^version=(.+)$/m);
+  const im = (mp || "").match(/^id=(.+)$/m);
+  document.getElementById("ver").textContent =
+    im && vm ? `模組 ${im[1]} · ${vm[1]}` : "— 尚未載入 —";
+  refresh();
+})();
+</script>
+</body>
+</html>

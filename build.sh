@@ -117,6 +117,11 @@ if [ ! -f "$ROOT_DIR/excluded_packages.txt" ]; then
     exit 1
 fi
 
+if [ ! -f "$ROOT_DIR/webroot/index.html" ]; then
+    echo "缺少 KernelSU WebUI 入口: webroot/index.html" >&2
+    exit 1
+fi
+
 # payload_versions.txt：所有 payload APK 的「package versionCode 模組相對路徑」
 # 清單，供 service.sh 做 data-app 期望版本查詢與系統 App 登錄稽核（PM 嚴格
 # 升級保留的自愈，見 AGENTS.md「PM 嚴格升級保留」）。建置產物，不入庫。
@@ -163,6 +168,7 @@ zip -qr "$OUTPUT_PATH" \
     tools/unity_install.sh \
     excluded_packages.txt \
     payload_versions.txt \
+    webroot \
     zygisk/arm64-v8a.so \
     zygisk/liblsplant.so \
     $REQUIRED_PAYLOADS \

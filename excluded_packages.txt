@@ -1,4 +1,4 @@
-# v1.0.2 Taplus Zygisk hook 排除清單
+# v1.0.2 起 Taplus Zygisk hook 排除清單
 # 一行一個 package name；主進程與 :suffix 子進程都會排除。
 # 一般排除會跳過 flip 並卸載本模組 library；Wallet / GMS 另強制 denylist unmount。
 # 部署位置：/data/adb/modules/HyperOS3EUXiaoAiPortalMiPay/excluded_packages.txt
@@ -20,3 +20,11 @@ com.google.android.apps.walletnfcrel
 com.google.android.gms
 # 偵測器類 app：排除 flip 並卸載模組 library，讓其讀到的環境不含本模組痕跡
 com.chunqiunativecheck
+# 2026-08-30 追加：myron 裝的三個純檢測／展示工具（只有檢測類功能，
+# 故一律排除：不翻轉、不讓本模組 .so 留在它們的行程內）
+# com.lingqing.trustattestor：專查 keystore／驗證鏈的輔助工具
+com.lingqing.trustattestor
+# io.github.vvb2060.keyattestation：只檢查 KeyStore key 的 attestation 認證鏈
+io.github.vvb2060.keyattestation
+# gr.nikolasspyr.integritycheck：只回傳 Play Integrity 判定結果
+gr.nikolasspyr.integritycheck

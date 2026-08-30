@@ -36,6 +36,7 @@ zygisk-src/test/hooker/build/
 zygisk-src/vendor/dobby/src/
 zygisk-src/vendor/dobby/build/
 .tmp-verify/
+.perch/
 
 # Python virtual environment
 .venv/
