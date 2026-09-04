@@ -45,6 +45,9 @@ Magisk/KernelSU module: HyperOS 3 EU localization — XiaoAI voice stack, Taplus
   manifest driving the `service.sh` registration audit — build artifact,
   not committed)
 - `customize.sh`, `tools/unity_install.sh` — install-time logic on device
+- `OS4-NOTES.md` — OS4 (Android 17) payload/hook migration research
+  (branch `jason/os4-payload-research`; MiuiHome is a Flutter+Rust rewrite
+  there — read before any OS4 work)
 
 ## Build & test
 
