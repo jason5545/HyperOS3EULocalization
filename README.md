@@ -4,7 +4,7 @@
 
 它補回小愛、語音喚醒、小米語音引擎、AI 通話、傳送門、智慧卡需要的元件，加入國行相簿、相簿編輯器、錄音機與主題商店，並修正國際版 ROM 無法觸發 Taplus 長按的問題。沒有音量鍵選單，也不會順手裝回負一屏、簡訊、黃頁、GetApps、快應用或小米錢包。
 
-目前版本是 `v1.0.15`。實機開發與驗證環境為 POCO F8 Ultra（myron）、xiaomi.eu `OS3.0.308.0.WPMCNXM`、Android 16、KernelSU 與 Zygisk Next。
+目前版本是 `v1.0.36`。實機開發與驗證環境為 POCO F8 Ultra（myron）、xiaomi.eu `OS3.0.309.0.WPMCNXM`、Android 16、ReSukiSU（mountify）與 Zygisk Next。
 
 ## 與上游的差異
 
@@ -62,7 +62,7 @@ AI 通話不是另一顆獨立 APK；它就在 `com.xiaomi.aiasst.service` 裡�
 
 電話 App 的原生 AI 通話項目會向 `com.xiaomi.aiasst.service.aicall.provider` 查詢可用狀態。本模組不偽裝 `ro.product.mod_device`；`com.xiaomi.aiasst.service` 也列入 Taplus 排除清單，不套用任何 Zygisk 欄位翻轉。AI 通話由小米官方 cloud-control 的機型規則、帳號、網路、權限與使用者開關決定可用性。`com.android.contacts`、`com.android.phone` 同樣保留在排除清單。
 
-重新開機後，可在 KernelSU／Magisk／APatch 的本模組頁面按「執行」，叫出小米官方 AI 通話設定完成首次啟用。完成後由 Provider 把原生項目提供給電話 App，不使用假 Launcher APK 或修改 Contacts。第一次啟用仍會顯示小米的使用者協議、隱私政策與系統權限頁；模組不會自動替使用者同意。
+重新開機後即可使用：v1.0.33 起 AI 通話改為預設開啟——開機服務把 `com.xiaomi.aiasst.service` 的四個開關鍵（主開關、通話中入口、通話中語音控制鈕、隱私同意）強制寫為開啟，並允許懸浮窗權限，撥號盤 ⋮ 選單與通話中 UI 的 AI 通話項目直接可用（舊版模組頁面的「執行」按鈕已隨之移除）。使用者手動關閉後下次開機仍會被重新開啟，這是刻意的 default-on 策略。
 
 ### 國行 App 簽章與版本
 
@@ -113,6 +113,8 @@ MYRON `OS3.0.308.0.WPMCNXM` 實機比對：
 
 Google Wallet 與 Google Play services 會強制走 denylist unmount，並卸載本模組 library。這兩個 process 看不到模組 mount，也不執行 Taplus flip。
 
+系統設定（`com.android.settings`）自 v1.0.36 起是唯一的「照舊 flip、單頁翻正」例外：進程仍套用 Taplus flip，但模組以 LSPlant 把憑證頁的 `DefaultCombinedPreferenceController.getCombinedProviderInfos` 換成它自己的 INTL 分支。小米在該方法裡以 `IS_INTERNATIONAL_BUILD` 為開關，CN 模式下把 passkey（Credential Manager）提供者清單過濾到只剩小米自家兩個服務——這段程式碼與台灣官方版逐行相同，純執行期旗標差異；我們的 flip 會誤觸這個 CN 分支，讓「密碼和帳號」頁形同只管自動填入、額外提供者開關整塊隱藏。hook 只解除這一頁的過濾（預設選擇與額外提供者開關都恢復官方功能），設定其餘頁面維持中國版判斷；shape 不符時安全停用，不綁版本。官方入口：設定 → 更多設定 → 語言與輸入法 → 密碼和帳號。
+
 這個作法會讓同一個 App 內其他國際版判斷一起改變，所以不是所有 Xiaomi App 都適合 flip。`excluded_packages.txt` 目前排除：
 
 | Package | 保留國際版判斷的原因 |
@@ -124,11 +126,13 @@ Google Wallet 與 Google Play services 會強制走 denylist unmount，並卸載
 | `com.android.calendar` | 日曆本身會依國際版旗標改變功能與服務判斷 |
 | `com.miui.packageinstaller` | 避免啟用中國 Market、病毒掃描與安裝器雲端設定 |
 | `com.miui.securitycenter` | 避免防毒雲掃描、反詐、垃圾訊息與流量服務一起切到中國版邏輯 |
+| `com.miui.securitycenter.remote` | NetworkAssistant provider 所在的點號獨立行程；flip 會讓控制中心「行動數據」磁貼只剩「已開啟」 |
 | `com.android.phone` | 避免電話、SIM 與電信功能套用中國版判斷 |
 | `com.android.systemui` | 避免狀態列、通知、控制中心與鎖定畫面套用中國版判斷 |
 | `com.xiaomi.aiasst.service` | AI 通話只走官方 cloud-control，不套用 Taplus 或其他國際版欄位翻轉 |
 | `com.google.android.apps.walletnfcrel` | 支付 App：強制 denylist unmount 並卸載本模組 library |
 | `com.google.android.gms` | Play services 全部子程序：強制 denylist unmount 並卸載本模組 library |
+| `com.chunqiunativecheck`、`com.lingqing.trustattestor`、`io.github.vvb2060.keyattestation`、`gr.nikolasspyr.integritycheck` | 純檢測／展示工具：排除 flip 並卸載模組 library，讓其讀到的環境不含本模組痕跡 |
 
 排除規則同時涵蓋 `package` 與 `package:suffix` 子程序。修改清單後不用重新刷模組，但必須重新啟動目標 App process；已經執行中的 process 不會自動還原欄位值。
 
@@ -166,7 +170,7 @@ ro.vendor.audio.aiasst.support=true
 
 - xiaomi.eu HyperOS 3
 - Magisk、KernelSU、SukiSU 或 APatch
-- 可用的 systemless 掛載能力；KernelSU 可使用 Hybrid Mount 等掛載元模組
+- 可用的 systemless 掛載能力；KernelSU／ReSukiSU 可使用 mountify 等掛載元模組
 - Zygisk Next；沒有它時 App payload 仍可掛載，但 Taplus 國際版修復不會生效
 - MYRON 上需 CorePatch，並在 LSPosed 對 `system` 啟用簽章、shared UID 與降版相容開關
 - 雙語音喚醒由模組內建 Zygisk 處理（需 Zygisk Next），不依賴 HyperCeiler 或 LSPosed scope
