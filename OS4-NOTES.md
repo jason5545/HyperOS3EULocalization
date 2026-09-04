@@ -1,6 +1,14 @@
 # OS4 (Android 17) migration research
 
 Research date: 2026-09-04, branch `jason/os4-payload-research`.
+
+> Cross-session linkage: the fake-relock boot-chain line (ABL tw301 + BDS +
+> rebuilt boot.efi) lives in `~/Downloads/myron-ota_OS4/gbl_patch/`, notes at
+> `os4_fake_relock_notes.md` — its 「跨 session 聯動」 section holds both
+> sides' conclusions. Final (2026-09-04): **wait for xiaomi.eu OS4, do NOT
+> flash the d2u8qwq CN OS4 package.** That toolchain stays valid as-is; only
+> boot.efi needs a rebuild from the xiaomi.eu OS4 package's abl.img.
+
 Source package: `O-myron-ota_images-v4.0.9-OS4.0.0.21.XPMCNXM-user-17.0`
 (community repack by "d2u8qwq" of the official CN fastboot package; content
 verified stock — no third-party mods inside). myron = REDMI K90 Pro Max =
