@@ -64,6 +64,8 @@ static int g_homefeed_preloads = 0;
 static int g_homefeed_starts = 0;
 static int g_mmedit_preloads = 0;
 static int g_mmedit_starts = 0;
+static int g_settingshook_preloads = 0;
+static int g_settingshook_starts = 0;
 
 MockJniKnobs g_jni;
 
@@ -94,6 +96,10 @@ void homefeedStartMiuiHome(JavaVM *) { g_homefeed_starts++; }
 // mmedit stubs (signatures from mmedit.h, pulled in by main.cpp)
 void mmeditPreloadLsplant() { g_mmedit_preloads++; }
 void mmeditStartEditor(JavaVM *) { g_mmedit_starts++; }
+
+// settingshook stubs (signatures from settingshook.h, pulled in by main.cpp)
+void settingshookPreloadLsplant() { g_settingshook_preloads++; }
+void settingshookStartSettings(JavaVM *) { g_settingshook_starts++; }
 
 static JavaVM_ g_fake_vm;
 int JNIEnv_::GetJavaVM(JavaVM_ **vm) {
@@ -164,6 +170,7 @@ static void resetState() {
     g_core_alive_starts = g_voice_trigger_starts = g_lsplant_preloads = 0;
     g_homefeed_preloads = g_homefeed_starts = 0;
     g_mmedit_preloads = g_mmedit_starts = 0;
+    g_settingshook_preloads = g_settingshook_starts = 0;
     g_jni = MockJniKnobs{};
 }
 
@@ -317,6 +324,46 @@ static void testMediaEditor() {
     unlink(tmp);
 }
 
+static void testSettings() {
+    g_case = "settings: resident, credman hook, still flipped";
+    resetState();
+    g_access_result = 0;            // debug flag "exists"
+    g_jni.find_class_ok = true;     // miui.os.Build present
+    g_jni.static_bool_value = true; // IS_INTERNATIONAL_BUILD currently true
+    specialize("com.android.settings");
+    CHECK(g_options.empty());                  // stays resident (no dlclose)
+    CHECK(g_settingshook_preloads == 1);       // lsplant preloaded in pre
+    CHECK(g_settingshook_starts == 1);         // credman hook worker started in post
+    CHECK(g_jni.set_static_bool_calls == 1);   // unlike miui_home, Settings keeps
+                                               // the Taplus flip — only the
+                                               // credentials page is unfiltered
+
+    // child processes are NOT hooked: the credentials page lives in the main process
+    resetState();
+    specialize("com.android.settings:remote");
+    CHECK(g_settingshook_preloads == 0 && g_settingshook_starts == 0);
+
+    // bare prefix must NOT match
+    g_case = "settings: prefix boundary";
+    resetState();
+    specialize("com.android.settingsx");
+    CHECK(g_settingshook_preloads == 0 && g_settingshook_starts == 0);
+
+    // the exclude list must not unload Settings either (worker must stay)
+    g_case = "settings: exclusion cannot unload";
+    resetState();
+    char tmp[] = "/tmp/taplus_test_exclude_settings.XXXXXX";
+    int fd = mkstemp(tmp);
+    const char *content = "com.android.settings\n";
+    write(fd, content, strlen(content));
+    close(fd);
+    g_exclude_override = tmp;
+    specialize("com.android.settings");
+    CHECK(g_options.empty());
+    CHECK(g_settingshook_preloads == 1 && g_settingshook_starts == 1);
+    unlink(tmp);
+}
+
 static void testSensitivePrefixBoundary() {
     g_case = "gms prefix boundary";
     resetState();
@@ -440,6 +487,7 @@ int main() {
     testNonSensitiveDebugFlip();
     testMiuiHome();
     testMediaEditor();
+    testSettings();
     testThemeRegionFlipIsImmediate();
 
     if (g_failures == 0) {

@@ -34,6 +34,10 @@
 //   表選到 CN 推論端點（intl SGP 端點對本帳號的超高畫質任務恆回
 //   taskStatus 4003，2026-08-28 myron 實測 CN 端點正常）。Taplus 翻轉
 //   照舊（它不是 miui_home）。
+// - com.android.settings 系統設定：永不 dlclose——settingshook worker 常駐，
+//   把憑證頁 DefaultCombinedPreferenceController.getCombinedProviderInfos
+//   換成其 INTL 分支（完整 credential provider 清單），只解除該頁的 CN
+//   過濾；Taplus 翻轉對 Settings 其餘部分照舊生效（它不是 miui_home）。
 
 #include <jni.h>
 #include <android/log.h>
@@ -45,6 +49,7 @@
 #include "dualwake.h"
 #include "homefeed.h"
 #include "mmedit.h"
+#include "settingshook.h"
 #include "obfstr.h"
 #include "gen/obf_strings.h"
 #include "zygisk.hpp"
@@ -258,13 +263,15 @@ public:
                  voice_trigger[kObfVoiceTriggerLen + 1],
                  voice_trigger_pfx[kObfVoiceTriggerPfxLen + 1],
                  miui_home[kObfMiuiHomeLen + 1],
-                 media_editor[kObfMediaEditorLen + 1];
+                 media_editor[kObfMediaEditorLen + 1],
+                 settings_app[kObfSettingsAppLen + 1];
             obf::decodeStr(kObfThemeManager, theme_manager);
             obf::decodeStr(kObfCoreAlive, core_alive);
             obf::decodeStr(kObfVoiceTrigger, voice_trigger);
             obf::decodeStr(kObfVoiceTriggerPfx, voice_trigger_pfx);
             obf::decodeStr(kObfMiuiHome, miui_home);
             obf::decodeStr(kObfMediaEditor, media_editor);
+            obf::decodeStr(kObfSettingsApp, settings_app);
 
             theme_manager_ = strcmp(nice, theme_manager) == 0;
             // 雙喚醒目標進程：精確辨識，絕不影響其他 app。
@@ -278,6 +285,9 @@ public:
             // 相簿編輯器進程：mmedit worker 的 region prop hook 需要模組常駐
             // （Taplus 翻轉照舊，見 postAppSpecialize）。
             media_editor_ = matchesPackageProcess(nice, media_editor);
+            // 系統設定進程：settingshook worker 需要模組常駐（Taplus 翻轉
+            // 照舊；精確匹配主進程即可，憑證頁不跑子進程）。
+            miui_settings_ = strcmp(nice, settings_app) == 0;
 
             obf::secureClear(theme_manager);
             obf::secureClear(core_alive);
@@ -285,11 +295,14 @@ public:
             obf::secureClear(voice_trigger_pfx);
             obf::secureClear(miui_home);
             obf::secureClear(media_editor);
+            obf::secureClear(settings_app);
         }
         skip_ = isExcluded(nice);
-        if (core_alive_ || voice_trigger_ || miui_home_ || media_editor_) {
-            // 雙喚醒 worker、桌面 prop hook 與編輯器 region hook 都需要模組
-            // 常駐；即使排除清單誤加這些 package，也不能 DLCLOSE 自己。
+        if (core_alive_ || voice_trigger_ || miui_home_ || media_editor_ ||
+                miui_settings_) {
+            // 雙喚醒 worker、桌面 prop hook、編輯器 region hook 與設定憑證頁
+            // hook 都需要模組常駐；即使排除清單誤加這些 package，也不能
+            // DLCLOSE 自己。
             skip_ = false;
         }
         if (skip_) {
@@ -306,6 +319,9 @@ public:
         if (media_editor_) {
             mmeditPreloadLsplant();
         }
+        if (miui_settings_) {
+            settingshookPreloadLsplant();
+        }
         env_->ReleaseStringUTFChars(args->nice_name, nice);
     }
 
@@ -315,6 +331,7 @@ public:
         if (theme_manager_) startThemeRegionWorker();
         if (miui_home_) homefeedStartMiuiHome(vm_);
         if (media_editor_) mmeditStartEditor(vm_);
+        if (miui_settings_) settingshookStartSettings(vm_);
         // 桌面永不翻轉：CN 版 LauncherAssistantCompat.newInstance 以
         // miui.os.Build.IS_INTERNATIONAL_BUILD 為 Google/global 負一屏的
         // 第一道門，翻成 false 反而讓 Google Feed 消失。
@@ -331,6 +348,7 @@ private:
     bool voice_trigger_ = false;
     bool miui_home_ = false;
     bool media_editor_ = false;
+    bool miui_settings_ = false;
 
     static bool matchesPackageProcess(const char *nice_name,
                                       const char *package_name) {

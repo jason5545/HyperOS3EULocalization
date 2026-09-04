@@ -14,13 +14,14 @@ Magisk/KernelSU module: HyperOS 3 EU localization — XiaoAI voice stack, Taplus
 - `zygisk-src/` — Zygisk module (`main.cpp` = Taplus INTL flip + sensitive-process
   policy, `dualwake.cpp` = dual wake, `homefeed.cpp` = MiuiHome hooks: Google-feed
   prop, minus-screen reroute, widget-picker reroute, `mmedit.cpp` = MediaEditor
-  region prop hook (CN AI cloud endpoint), `art_resolver.cpp` = ART
-  symbol resolver, `obfstr.h` + `gen_obf_strings.py` = build-time XOR string
-  encoding)
+  region prop hook (CN AI cloud endpoint), `settingshook.cpp` = Settings
+  credentials-page hook (unfilters the CN credential-provider list for that page
+  only), `art_resolver.cpp` = ART symbol resolver, `obfstr.h` +
+  `gen_obf_strings.py` = build-time XOR string encoding)
 - `zygisk-src/test/` — host-side mock test (no device needed); `test/hooker/` —
-  JVM regression test for the `jrc.homefeed` / `jrc.mmedit` hookers (hand-rolled
-  Android stubs + fake hook-target classes with the same shapes as the pinned
-  CN build)
+  JVM regression test for the `jrc.homefeed` / `jrc.mmedit` / `jrc.settings`
+  hookers (hand-rolled Android stubs + fake hook-target classes with the same
+  shapes as the pinned CN build)
 - `scripts/build_zygisk.sh` — native build (needs `NDK_BUILD=/path/to/ndk-build`)
 - `dualwake_boot.sh` — dual-wake cold-boot watchdog, copied by `service.sh` to
   `/data/local/tmp` and run in the background (see "Dual-wake boot race" below)
@@ -101,7 +102,7 @@ Two more stealth layers in the same vein:
   attempt failed the same way: clang still emitted the literal pieces).
   Residual readable strings are the JNI/dlsym constants in
   `dualwake.cpp`/`homefeed.cpp` and the embedded hooker dex, which only load
-  inside the trusted voice-trigger/launcher processes.
+  inside the trusted voice-trigger/launcher/mediaeditor/settings processes.
 
 ## Systemless payload native libs (root cause, 2026-08-26 on myron)
 
@@ -173,6 +174,31 @@ checks, and the dir is ignored wherever the APK loads libs from itself.
   hooked shape is a framework method, not app code (contrast HomeRsaHooker).
   Never `resetprop ro.miui.region` globally instead — that flips the whole
   system's region behavior; the spoof is per-process by design.
+- `com.android.settings` must never be dlclosed (the Taplus flip still applies —
+  like mediaeditor it IS flipped) — the settingshook worker lives in the module
+  and lsplant-hooks the Settings build's own static
+  `DefaultCombinedPreferenceController.getCombinedProviderInfos(CredentialManager,
+  int)` inside the main Settings process only (exact match, no child processes),
+  substituting its INTL branch (full provider list, via a reflection call of the
+  @SystemApi `CredentialManager.getCredentialProviderServices(userId, 2)`; any
+  reflection failure falls back to the hooked original). Root cause (2026-09-04,
+  myron): the stock "Passwords, passkeys & autofill" UI is full AOSP
+  (`DefaultCombinedPicker` radio default + `CredentialManagerPreferenceController`
+  extra-provider toggles, both writing through `setEnabledProviders`), but that
+  one method filters the credential-provider list to Xiaomi's own two services
+  (`com.miui.passwords` / `com.miui.contentcatcher`
+  `XiaomiCredentialProviderService`) when `IS_INTERNATIONAL_BUILD == false` —
+  byte-identical logic in xiaomi.eu OS3.0.309 and TW Global OS3.0.1.0
+  Settings.apk, a pure runtime-flag difference. Our Taplus flip activates that
+  CN branch inside Settings, which makes the picker effectively autofill-only
+  (credential_service frozen, or force-defaulted to Xiaomi when empty) and hides
+  the whole extra-provider toggle section (`hasNonPrimaryServices()` false on the
+  filtered list). This is why `com.android.settings` must NOT go into
+  `excluded_packages.txt` to "fix" the page: excluding would un-flip the WHOLE
+  Settings app; the hook flips only the page. Not version-pinned (pure function
+  replacement, shape-guarded by `shouldInstall`; worst case is a safe no-op) —
+  contrast HomeRsaHooker, which rewrites app-internal statics. Residency and
+  flip both hold regardless of the exclusion list (hardcoded in `main.cpp`).
 - The CN MiuiHome payload (`system/product/priv-app/MiuiHome`,
   RELEASE-7.50.06.2529 / vc 750062529) gets its Google feed option from the
   homefeed hook, not from props: CN `DeviceConfig.isUseGoogleMinusScreen()`
@@ -368,6 +394,24 @@ the shared mount peer group into still-running long-lived processes**
 app re-runs specialize → umount → clean → passes, until the next re-bind
 re-dirties it. That is the exact intermittent pattern.
 
+2026-08-30 addendum (mountify era): two of BW_Audio's binds became
+**undeletable zombies** — its post-fs-data binds of
+`/vendor/etc/dolby/dax-default.xml` and
+`/vendor/etc/audio/sku_canoe/quasar_config.xml` run BEFORE mountify's
+`/vendor/etc` overlay, which then covers them; pathwalk resolves into the
+overlay, so neither KSU per-app umount nor the scrubber's path-based
+`umount -l` can detach the entries, and they sat in every app namespace
+(gms persistently showed exactly these 2). Side effect: the quasar bind was
+shadowed and **ineffective** (live file was stock). Fixed by serving both
+files from BW_Audio's standard `vendor/etc/…` tree through mountify instead:
+`post-fs-data.sh` skips the two vendor-path binds while mountify is active,
+and `common/dolby.sh` only re-binds the vendor dax path when live content
+differs from the selected curve (`cmp -s` guard — curve switches and the
+ADJ_* tuned copy still bind on top of the overlay, reachable and per-app
+umountable). Quasar is effective again as a result. The zombies clear only
+on reboot. The `/odm` binds were never affected (no overlay there) and stay
+as-is.
+
 Fix: `mount_scrub.sh` (same `/data/local/tmp` nohup pattern as
 dualwake_boot.sh, started unconditionally by `service.sh`) scrubs every 15s:
 for each live gms(+`:…`/`.…` children)/wallet/vending process — the same
@@ -560,7 +604,19 @@ inert and dual wake fully dead. Four independent breakages, one shared origin:
 mounting and package registration behave differently here. All fixed or
 self-healing in v1.0.31; details below.
 
-### 1. Module mounting is delegated to the `hybrid_mount` metamodule
+### 1. Module mounting is delegated to a metamodule
+
+**Update 2026-08-30: hybrid_mount replaced by mountify v2.0.4; kernel back to
+official GKI (no susfs).** LunarKernel was dropped because susfs's hidden mounts
+leave mountinfo id gaps and another detector app reported 掛載間隙 (mount gap).
+mountify (metamodule, `mountify_mounts=2` auto, tmpfs staging) now mounts all
+modules with standard partition folders; its tmpfs staging at
+`/mnt/vendor/mountify` is lazy-umounted after the overlays are up, so the only
+residue is the overlay entries themselves (`lowerdir=/mnt/vendor/mountify/...`
+visible in every process's mountinfo). Per-app "umount modules" does NOT cover
+mountify's overlays (device name `overlay`, not KSU-tracked). The hybrid_mount
+notes below are kept for history; the "stay on 4.2.0" advice applied to that
+metamodule only.
 
 ReSukiSU core does **not** mount modules itself; without the `hybrid_mount`
 metamodule (or with a broken one) the entire `system/product/…` payload is
@@ -648,6 +704,10 @@ registration exists). Verified end-to-end on-device:
   are CN-only packages with no EU counterpart and were not touched.
 
 ### 4. susfs does **not** obsolete the mount scrubber
+
+(2026-08-30: the device is back on the official GKI kernel — no susfs at all
+now; the gap-detection issue above is why. The scrubber is unconditional on
+this setup by necessity.)
 
 susfs (`hide_sus_mnts`) hides KSU's own mounts, but not hand-rolled runtime
 binds: BW_Audio's watchdog re-binds were observed leaking into

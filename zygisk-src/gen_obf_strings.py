@@ -56,12 +56,19 @@ STRINGS = {
     "VoiceTriggerPfx": "com.miui.voicetrigger:",
     "MiuiHome":        "com.miui.home",
     "MediaEditor":     "com.miui.mediaeditor",
+    "SettingsApp":     "com.android.settings",
     # flip target (miui.os.Build)
     "BuildClass": "miui/os/Build",
     "IntlField":  "IS_INTERNATIONAL_BUILD",
     # ThemeManager region-cache hook targets
     "DeviceUtils": "com.android.thememanager.basemodule.utils.DeviceUtils",
     "Ld6Class":    "com.android.thememanager.basemodule.utils.ld6",
+    # Settings 憑證頁 hook 目標（app 內部類，見 settingshook.cpp；
+    # CredListClass 為 ClassLoader.loadClass 用的點號形式）
+    "CredListClass":
+        "com.android.settings.applications.credentials.DefaultCombinedPreferenceController",
+    "CredListMethod": "getCombinedProviderInfos",
+    "CredListSig":    "(Landroid/credentials/CredentialManager;I)Ljava/util/List;",
 }
 
 def main() -> None:

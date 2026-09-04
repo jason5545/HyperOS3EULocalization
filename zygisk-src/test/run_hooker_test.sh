@@ -17,6 +17,7 @@ javac -d "$BUILD_DIR" \
     "$DIR/../java/jrc/homefeed/MinusScreenHooker.java" \
     "$DIR/../java/jrc/homefeed/WidgetPickerHooker.java" \
     "$DIR/../java/jrc/mmedit/RegionHooker.java" \
+    "$DIR/../java/jrc/settings/CredListHooker.java" \
     "$DIR/hooker/HookerTestMain.java"
 
 java -cp "$BUILD_DIR" HookerTestMain

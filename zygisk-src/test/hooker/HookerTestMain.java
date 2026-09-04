@@ -26,6 +26,7 @@ import jrc.homefeed.HomeRsaHooker;
 import jrc.homefeed.MinusScreenHooker;
 import jrc.homefeed.WidgetPickerHooker;
 import jrc.mmedit.RegionHooker;
+import jrc.settings.CredListHooker;
 
 /**
  * Host-side regression test for the MiuiHome homefeed hookers (no device, no
@@ -50,6 +51,14 @@ public final class HookerTestMain {
     public static String fakeSystemGet(String key) { return "real:" + key; }
 
     public static String fakeSystemGetThrows(String key) {
+        throw new IllegalStateException("boom");
+    }
+
+    public static Object fakeGetCombined(android.credentials.CredentialManager cm, int userId) {
+        return "filtered-original";
+    }
+
+    public static Object fakeGetCombinedThrows(android.credentials.CredentialManager cm, int userId) {
         throw new IllegalStateException("boom");
     }
 
@@ -123,6 +132,55 @@ public final class HookerTestMain {
         caseName = "mmedit shouldInstall shape guard";
         check(RegionHooker.shouldInstall(),
                 "stub SystemProperties.get(String) exists, must install");
+    }
+
+    private static void testCredListShouldInstall() {
+        caseName = "credlist shouldInstall shape guard";
+        check(CredListHooker.shouldInstall(),
+                "fake target + stub CredentialManager exist, must install");
+    }
+
+    private static void testCredListCallbackReturnsFullList() throws Throwable {
+        caseName = "credlist callback returns full list";
+        CredListHooker hooker = new CredListHooker();
+        hooker.backup = backupOf("fakeGetCombined",
+                android.credentials.CredentialManager.class, int.class);
+        android.credentials.CredentialManager cm = new android.credentials.CredentialManager();
+
+        Object out = hooker.callback(new Object[]{cm, 0});
+        check(out instanceof java.util.List && ((java.util.List<?>) out).size() == 3
+                        && "FULL:gms".equals(((java.util.List<?>) out).get(0)),
+                "must return the unfiltered provider list, got " + out);
+        check(cm.lastFlags == 2, "full-list flags must be 2 (INTL branch), got " + cm.lastFlags);
+        check(cm.lastUserId == 0, "userId must pass through, got " + cm.lastUserId);
+    }
+
+    private static void testCredListCallbackFallback() throws Throwable {
+        caseName = "credlist callback reflection failure falls back";
+        CredListHooker hooker = new CredListHooker();
+        hooker.backup = backupOf("fakeGetCombined",
+                android.credentials.CredentialManager.class, int.class);
+        android.credentials.CredentialManager cm = new android.credentials.CredentialManager();
+        cm.throwsOnCall = true;  // @SystemApi 反射被擋的情境
+
+        Object out = hooker.callback(new Object[]{cm, 0});
+        check("filtered-original".equals(out),
+                "must fall back to the original filtered result, got " + out);
+    }
+
+    private static void testCredListCallbackRethrowsCause() throws Throwable {
+        caseName = "credlist callback exception unwrap";
+        CredListHooker hooker = new CredListHooker();
+        hooker.backup = backupOf("fakeGetCombinedThrows",
+                android.credentials.CredentialManager.class, int.class);
+        android.credentials.CredentialManager cm = new android.credentials.CredentialManager();
+        cm.throwsOnCall = true;  // 強制走 backup 路徑
+        try {
+            hooker.callback(new Object[]{cm, 0});
+            check(false, "cause must be rethrown");
+        } catch (IllegalStateException e) {
+            check("boom".equals(e.getMessage()), "original cause, not InvocationTargetException");
+        }
     }
 
     private static void testShouldInstall() {
@@ -392,6 +450,10 @@ public final class HookerTestMain {
         testRegionCallback();
         testRegionCallbackRethrowsCause();
         testRegionShouldInstall();
+        testCredListShouldInstall();
+        testCredListCallbackReturnsFullList();
+        testCredListCallbackFallback();
+        testCredListCallbackRethrowsCause();
         testShouldInstall();
         testServiceVersionRewrite();
         testServiceVersionHealthyUntouched();
